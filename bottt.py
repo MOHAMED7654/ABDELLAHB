@@ -5,13 +5,13 @@ import os
 from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     MessageHandler,
     ContextTypes,
     filters,
     CallbackQueryHandler,
-    ChatMemberHandler
+    CallbackContext
 )
 
 # إعدادات اللوغ
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # بيانات البوت
 TOKEN = "8124498237:AAHipIHoU3W6OzYF2RiuxZvkc7ar8FWmyas"
-SECRET_TOKEN = "my_secret_123"  # سلسلة صالحة بدون رموز خاصة
+SECRET_TOKEN = "my_secret_123"
 WEBHOOK_URL = "https://abdellahb-2.onrender.com/webhook"
 PORT = int(os.environ.get('PORT', 8443))
 
@@ -94,6 +94,9 @@ Note: In necessary cases, you may contact the supervisors
 """
 }
 
+# تهيئة التطبيق
+application = None
+
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         return True
@@ -105,8 +108,7 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return False
 
 async def check_subscription(user_id):
-    # هنا يجب إضافة الكود للتحقق من الاشتراك في القناة
-    return True  # مؤقتاً نعتبر أن الجميع مشترك
+    return True
 
 async def warn_user(chat_id, user_id, reason=None):
     try:
@@ -192,9 +194,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_intro_message(update: Update):
     await update.message.reply_text(
         "👋 مرحبا بك في بوت إدارة المجموعة المتقدم ⚙️\n\n"  
-" *صنع بواسطة:* [Mik_emm](https://t.me/Mik_emm) مع ❤️\n"
-
-"📌 يمكنك استخدام الأوامر التالية:\n\n"
+        "📌 يمكنك استخدام الأوامر التالية:\n\n"
         "📌 أوامر المشرفين:\n"
         "👮‍♂️ /admins - عرض الإداريين\n"
         "📢 /tagall - تاق لجميع الأعضاء\n"
@@ -275,11 +275,9 @@ async def warn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ يجب ذكر اسم المستخدم مع @")
             return
 
-        # الحصول على ID المستخدم من الرسالة التي تم الرد عليها
         if update.message.reply_to_message:
             user_id = update.message.reply_to_message.from_user.id
         else:
-            # محاولة الحصول على ID من اسم المستخدم
             try:
                 chat_member = await context.bot.get_chat_member(update.effective_chat.id, username)
                 user_id = chat_member.user.id
@@ -313,11 +311,9 @@ async def unwarn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⚠️ يجب ذكر اسم المستخدم مع @")
             return
                      
-        # الحصول على ID المستخدم من الرسالة التي تم الرد عليها
         if update.message.reply_to_message:
             user_id = update.message.reply_to_message.from_user.id
         else:
-            # محاولة الحصول على ID من اسم المستخدم
             try:
                 chat_member = await context.bot.get_chat_member(update.effective_chat.id, username)
                 user_id = chat_member.user.id
@@ -347,11 +343,9 @@ async def get_warns_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ يجب ذكر اسم المستخدم مع @")
             return
 
-        # الحصول على ID المستخدم من الرسالة التي تم الرد عليها
         if update.message.reply_to_message:
             user_id = update.message.reply_to_message.from_user.id
         else:
-            # محاولة الحصول على ID من اسم المستخدم
             try:
                 chat_member = await context.bot.get_chat_member(update.effective_chat.id, username)
                 user_id = chat_member.user.id
@@ -445,17 +439,14 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         for member in update.message.new_chat_members:
-            # تجاهل إذا كان البوت نفسه
             if member.id == context.bot.id:
                 continue
             
-            # إرسال رسالة الترحيب
             await update.message.reply_text(
                 WELCOME_MESSAGES["ar"],
                 parse_mode="Markdown"
             )
             
-            # إرسال النسخة الإنجليزية بعد 3 ثواني
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=WELCOME_MESSAGES["en"],
@@ -463,7 +454,6 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_to_message_id=update.message.message_id
             )
             
-            # تسجيل المستخدم
             chat_id = str(update.effective_chat.id)
             if chat_id not in users_by_chat:
                 users_by_chat[chat_id] = []
@@ -492,7 +482,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         is_adm = await is_admin(update, context)
 
-        # حذف الروابط
         if settings.get(chat_id, {}).get("delete_links", True):
             if re.search(r'(https?://\S+|www\.\S+)', message.text or ""):
                 if not is_adm:
@@ -506,7 +495,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         logger.error(f"Error deleting link: {e}")
 
-        # حذف الكلمات المسيئة
         if contains_banned_word(message.text):
             if not is_adm:
                 try:
@@ -529,11 +517,9 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"Error handling banned word: {e}")
 
-        # الرد التلقائي
         if message.text in auto_replies:
             await message.reply_text(auto_replies[message.text])
 
-        # تسجيل المستخدم
         if chat_id not in users_by_chat:
             users_by_chat[chat_id] = []
         if user_id not in users_by_chat[chat_id]:
@@ -549,22 +535,21 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ويب هوك handlers
 async def webhook_handler(request):
-    # التحقق من الرمز السري
     token = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
     if token != SECRET_TOKEN:
         return web.Response(status=403, text="Forbidden")
     
     try:
         data = await request.json()
-        update = Update.de_json(data, app.bot)
-        await app.process_update(update)
+        update = Update.de_json(data, application.bot)
+        await application.process_update(update)
         return web.Response(text="OK", status=200)
     except Exception as e:
         logger.error(f"Error in webhook handler: {e}")
         return web.Response(text="Error", status=500)
 
 async def set_webhook():
-    await app.bot.set_webhook(
+    await application.bot.set_webhook(
         url=WEBHOOK_URL,
         secret_token=SECRET_TOKEN,
         drop_pending_updates=True
@@ -574,33 +559,35 @@ async def set_webhook():
 async def on_startup(app):
     await set_webhook()
 
+def setup_application():
+    global application
+    application = Application.builder().token(TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("admins", admins))
+    application.add_handler(CommandHandler("tagall", tagall))
+    application.add_handler(CommandHandler("warn", warn_user_command))
+    application.add_handler(CommandHandler("unwarn", unwarn_user_command))
+    application.add_handler(CommandHandler("warns", get_warns_command))
+    application.add_handler(CommandHandler("warn_list", warn_list))
+    application.add_handler(CommandHandler("setwarns", set_max_warns))
+    application.add_handler(CommandHandler("delete_links", delete_links_setting))
+    application.add_handler(CommandHandler("ping", ping))
+    application.add_handler(CallbackQueryHandler(callback_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
+    application.add_error_handler(error_handler)
+    
+    return application
+
 def main():
-    global app
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = setup_application()
     
-    # تسجيل ال handlers
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("admins", admins))
-    app.add_handler(CommandHandler("tagall", tagall))
-    app.add_handler(CommandHandler("warn", warn_user_command))
-    app.add_handler(CommandHandler("unwarn", unwarn_user_command))
-    app.add_handler(CommandHandler("warns", get_warns_command))
-    app.add_handler(CommandHandler("warn_list", warn_list))
-    app.add_handler(CommandHandler("setwarns", set_max_warns))
-    app.add_handler(CommandHandler("delete_links", delete_links_setting))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
-    app.add_error_handler(error_handler)
-    
-    # إعداد ويب هوك
     web_app = web.Application()
     web_app.router.add_post('/webhook', webhook_handler)
     web_app.on_startup.append(on_startup)
     
-    # تشغيل الخادم
     web.run_app(web_app, host='0.0.0.0', port=PORT)
 
 if __name__ == "__main__":
