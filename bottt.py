@@ -10,8 +10,7 @@ from telegram.ext import (
     MessageHandler,
     ContextTypes,
     filters,
-    CallbackQueryHandler,
-    CallbackContext
+    CallbackQueryHandler
 )
 
 # إعدادات اللوغ
