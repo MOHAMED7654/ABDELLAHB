@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # بيانات البوت
-TOKEN ="8124498237:AAHipIHoU3W6OzYF2RiuxZvkc7ar8FWmyas"
+TOKEN =os.getenv("TOKEN")
 USER_FILE = "users.json"
 WARN_FILE = "warns.json"
 SETTINGS_FILE = "settings.json"
@@ -569,3 +569,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
