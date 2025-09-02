@@ -564,9 +564,10 @@ def main():
     app.add_error_handler(error_handler)
     
     print("✅ البوت يعمل الآن...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling()
 
 if __name__ == "__main__":
 
     main()
+
 
