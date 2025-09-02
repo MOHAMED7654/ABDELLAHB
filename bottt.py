@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # بيانات البوت
-TOKEN = os.getenv("TOKEN")
+TOKEN ="8124498237:AAHipIHoU3W6OzYF2RiuxZvkc7ar8FWmyas"
 USER_FILE = "users.json"
 WARN_FILE = "warns.json"
 SETTINGS_FILE = "settings.json"
@@ -567,4 +567,5 @@ def main():
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+
     main()
