@@ -24,7 +24,7 @@ TOKEN = "8124498237:AAHipIHoU3W6OzYF2RiuxZvkc7ar8FWmyas"
 USER_FILE = "users.json"
 WARN_FILE = "warns.json"
 SETTINGS_FILE = "settings.json"
-WEBHOOK_URL = "https://abdellahb-2.onrender.com"  # ضع رابط Render النهائي
+WEBHOOK_URL = "https://abdellahb-2.onrender.com/webhook"  # ضع رابط Render النهائي
 WEBHOOK_PORT = 8443
 
 # تحميل وحفظ البيانات
@@ -407,5 +407,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
