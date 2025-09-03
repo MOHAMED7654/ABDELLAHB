@@ -883,10 +883,10 @@ async def webhook_handler(request):
     try:
         data = await request.json()
         update = Update.de_json(data, application.bot)
-               await application.process_update(update)
+        await application.process_update(update)
         return web.Response(text="OK", status=200)
     except Exception as e:
-        logger.error(f"Error processing webhook update: {e}")
+        logger.error(f"Error in webhook handler: {e}")
         return web.Response(text="Error", status=500)
 
 async def set_webhook():
@@ -896,21 +896,23 @@ async def set_webhook():
             secret_token=SECRET_TOKEN,
             drop_pending_updates=True
         )
-        logger.info("✅ Webhook set successfully")
+        logger.info("Webhook set successfully")
     except Exception as e:
-        logger.error(f"❌ Error setting webhook: {e}")
+        logger.error(f"Error setting webhook: {e}")
 
-async def remove_webhook():
-    try:
-        await application.bot.delete_webhook()
-        logger.info("✅ Webhook removed successfully")
-    except Exception as e:
-        logger.error(f"❌ Error removing webhook: {e}")
+async def on_startup(app):
+    await application.initialize()
+    await application.start()
+    await set_webhook()
+    logger.info("Bot started successfully with webhook!")
 
-# ================== التشغيل الرئيسي ==================
+async def on_shutdown(app):
+    await application.stop()
+    await application.shutdown()
+    logger.info("Bot stopped successfully!")
 
 def main():
-    # إضافة المعالجات
+    # إضافة جميع handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admins", admins))
@@ -922,35 +924,19 @@ def main():
     application.add_handler(CommandHandler("setwarns", set_max_warns))
     application.add_handler(CommandHandler("delete_links", delete_links_setting))
     application.add_handler(CommandHandler("ping", ping))
-    
     application.add_handler(CallbackQueryHandler(callback_handler))
-    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
-    
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
     application.add_error_handler(error_handler)
 
-    # تشغيل البوت
-    if os.environ.get('RENDER', None):
-        # تشغيل على Render مع ويب هوك
-        logger.info("🚀 Starting bot in webhook mode...")
-        app = web.Application()
-        app.router.add_post('/webhook', webhook_handler)
-        
-        async def on_startup(app):
-            await set_webhook()
-        
-        app.on_startup.append(on_startup)
-        
-        web.run_app(
-            app,
-            host='0.0.0.0',
-            port=PORT,
-            ssl_context=None
-        )
-    else:
-        # تشغيل محلي مع polling
-        logger.info("🚀 Starting bot in polling mode...")
-        application.run_polling(drop_pending_updates=True)
+    # إعداد ويب هوك
+    web_app = web.Application()
+    web_app.router.add_post('/webhook', webhook_handler)
+    web_app.on_startup.append(on_startup)
+    web_app.on_shutdown.append(on_shutdown)
+
+    # تشغيل الخادم
+    web.run_app(web_app, host='0.0.0.0', port=PORT)
 
 if __name__ == "__main__":
     main()
