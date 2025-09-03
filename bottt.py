@@ -473,11 +473,8 @@ async def save_all_members(chat_id, context):
         logger.info(f"⏳ جاري حفظ أعضاء المجموعة {chat_id} في قاعدة البيانات...")
         
         members_count = 0
+        
         try:
-            # الطريقة الصحيحة: استخدام get_chat_members_count ثم get_chat_administrators
-            total_members = await context.bot.get_chat_members_count(chat_id)
-            logger.info(f"عدد الأعضاء في المجموعة: {total_members}")
-            
             # حفظ المشرفين أولاً (هم الأكثر نشاطاً)
             admins = await context.bot.get_chat_administrators(chat_id)
             for admin in admins:
@@ -490,14 +487,16 @@ async def save_all_members(chat_id, context):
                         admin.user.last_name
                     )
                     members_count += 1
+                    logger.info(f"تم حفظ المشرف: {admin.user.id}")
                 except Exception as e:
                     logger.error(f"Error saving admin {admin.user.id}: {e}")
                     continue
             
-            # محاولة حفظ بعض الأعضاء النشطين من الرسائل الحديثة
+            # حفظ الأعضاء النشطين من الرسائل الحديثة (200 رسالة)
             try:
-                messages = await context.bot.get_chat_history(chat_id, limit=100)
-                for message in messages:
+                # استخدام async for مع get_chat_history
+                message_count = 0
+                async for message in context.bot.get_chat_history(chat_id, limit=200):
                     if hasattr(message, 'from_user') and message.from_user:
                         try:
                             add_member(
@@ -508,13 +507,34 @@ async def save_all_members(chat_id, context):
                                 message.from_user.last_name
                             )
                             members_count += 1
+                            message_count += 1
                         except Exception as e:
                             continue
-            except Exception:
-                pass
+                
+                logger.info(f"تم حفظ {message_count} عضو من الرسائل")
+                            
+            except Exception as e:
+                logger.error(f"Error getting chat history: {e}")
+                # محاولة بديلة إذا فشلت الطريقة الأولى
+                try:
+                    updates = await context.bot.get_updates(limit=50)
+                    for update in updates:
+                        if update.message and update.message.chat.id == chat_id:
+                            user = update.message.from_user
+                            if user and user.id != context.bot.id:
+                                add_member(
+                                    user.id,
+                                    str(chat_id),
+                                    user.username,
+                                    user.first_name,
+                                    user.last_name
+                                )
+                                members_count += 1
+                except Exception as e2:
+                    logger.error(f"Error getting updates: {e2}")
                     
         except Exception as e:
-            logger.error(f"Error getting chat members: {e}")
+            logger.error(f"Error in member collection: {e}")
             return False
         
         logger.info(f"✅ تم حفظ {members_count} عضو في قاعدة البيانات")
@@ -960,3 +980,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
