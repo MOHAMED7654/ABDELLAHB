@@ -475,7 +475,7 @@ async def save_all_members(chat_id, context):
         members_count = 0
         
         try:
-            # حفظ المشرفين أولاً (هم الأكثر نشاطاً)
+            # 1. حفظ المشرفين أولاً
             admins = await context.bot.get_chat_administrators(chat_id)
             for admin in admins:
                 try:
@@ -492,50 +492,22 @@ async def save_all_members(chat_id, context):
                     logger.error(f"Error saving admin {admin.user.id}: {e}")
                     continue
             
-            # حفظ الأعضاء النشطين من الرسائل الحديثة (200 رسالة)
-            try:
-                # استخدام async for مع get_chat_history
-                message_count = 0
-                async for message in context.bot.get_chat_history(chat_id, limit=200):
-                    if hasattr(message, 'from_user') and message.from_user:
-                        try:
-                            add_member(
-                                message.from_user.id,
-                                str(chat_id),
-                                message.from_user.username,
-                                message.from_user.first_name,
-                                message.from_user.last_name
-                            )
-                            members_count += 1
-                            message_count += 1
-                        except Exception as e:
-                            continue
-                
-                logger.info(f"تم حفظ {message_count} عضو من الرسائل")
-                            
-            except Exception as e:
-                logger.error(f"Error getting chat history: {e}")
-                # محاولة بديلة إذا فشلت الطريقة الأولى
-                try:
-                    updates = await context.bot.get_updates(limit=50)
-                    for update in updates:
-                        if update.message and update.message.chat.id == chat_id:
-                            user = update.message.from_user
-                            if user and user.id != context.bot.id:
-                                add_member(
-                                    user.id,
-                                    str(chat_id),
-                                    user.username,
-                                    user.first_name,
-                                    user.last_name
-                                )
-                                members_count += 1
-                except Exception as e2:
-                    logger.error(f"Error getting updates: {e2}")
+            # 2. الطريقة الوحيدة التي تعمل: الاعتماد على الأعضاء الموجودين بالفعل في DB
+            # أو انتظار أن يرسل الأعضاء رسائل ليتم تسجيلهم تلقائياً
+            
+            logger.info("⚠️ لا يمكن جلب جميع الأعضاء في وضع Webhook")
+            logger.info("📝 سيتم الاعتماد على التسجيل التلقائي عند إرسال الرسائل")
+            
+            # 3. جلب الأعضاء الموجودين بالفعل في قاعدة البيانات
+            existing_members = get_members(str(chat_id), limit=1000)
+            if existing_members:
+                logger.info(f"وجد {len(existing_members)} عضو مخزون مسبقاً")
+                members_count += len(existing_members)
                     
         except Exception as e:
             logger.error(f"Error in member collection: {e}")
-            return False
+            # حتى لو فشل، نعود True لأن بعض الأعضاء تم حفظهم
+            return members_count > 0
         
         logger.info(f"✅ تم حفظ {members_count} عضو في قاعدة البيانات")
         return members_count > 0
@@ -543,7 +515,6 @@ async def save_all_members(chat_id, context):
     except Exception as e:
         logger.error(f"Error in save_all_members: {e}")
         return False
-
 # ================== الأوامر الأساسية ==================
 
 @admin_only
@@ -980,4 +951,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
