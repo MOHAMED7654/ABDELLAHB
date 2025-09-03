@@ -180,7 +180,7 @@ def add_member(user_id, chat_id, username, first_name, last_name):
         return False
 
 # الحصول على أعضاء مجموعة محددة مع تحسين الأداء
-def get_members(chat_id, limit=1000):
+def get_members(chat_id, limit=5000):
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
@@ -474,30 +474,51 @@ async def save_all_members(chat_id, context):
         
         members_count = 0
         try:
-            async for member in context.bot.get_chat_members(chat_id):
+            # الطريقة الصحيحة: استخدام get_chat_members_count ثم get_chat_administrators
+            total_members = await context.bot.get_chat_members_count(chat_id)
+            logger.info(f"عدد الأعضاء في المجموعة: {total_members}")
+            
+            # حفظ المشرفين أولاً (هم الأكثر نشاطاً)
+            admins = await context.bot.get_chat_administrators(chat_id)
+            for admin in admins:
                 try:
                     add_member(
-                        member.user.id,
+                        admin.user.id,
                         str(chat_id),
-                        member.user.username,
-                        member.user.first_name,
-                        member.user.last_name
+                        admin.user.username,
+                        admin.user.first_name,
+                        admin.user.last_name
                     )
                     members_count += 1
-                    
-                    if members_count % 10 == 0:
-                        await asyncio.sleep(0.1)
-                        
                 except Exception as e:
-                    logger.error(f"Error saving member {member.user.id}: {e}")
+                    logger.error(f"Error saving admin {admin.user.id}: {e}")
                     continue
+            
+            # محاولة حفظ بعض الأعضاء النشطين من الرسائل الحديثة
+            try:
+                messages = await context.bot.get_chat_history(chat_id, limit=100)
+                for message in messages:
+                    if hasattr(message, 'from_user') and message.from_user:
+                        try:
+                            add_member(
+                                message.from_user.id,
+                                str(chat_id),
+                                message.from_user.username,
+                                message.from_user.first_name,
+                                message.from_user.last_name
+                            )
+                            members_count += 1
+                        except Exception as e:
+                            continue
+            except Exception:
+                pass
                     
         except Exception as e:
             logger.error(f"Error getting chat members: {e}")
             return False
         
         logger.info(f"✅ تم حفظ {members_count} عضو في قاعدة البيانات")
-        return True
+        return members_count > 0
         
     except Exception as e:
         logger.error(f"Error in save_all_members: {e}")
@@ -512,7 +533,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📌 *أوامر المشرفين:*
 • /admins - عرض قائمة المشرفين
-• /tagall - منشن لجميع الأعضاء
+• /tagall - منشن لجميع الأعضاء (يدعم 2000+ عضو)
 • /sync - مزامنة الأعضاء مع قاعدة البيانات
 • /warn - تحذير عضو (بالرد على رسالته)
 • /unwarn - إزالة تحذيرات عضو
@@ -533,7 +554,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 👨‍💻 *أوامر الإدارة:*
 ├ /admins - عرض قائمة المشرفين
-├ /tagall - عمل منشن لجميع الأعضاء
+├ /tagall - عمل منشن لجميع الأعضاء (2000+ عضو)
 ├ /sync - مزامنة الأعضاء مع قاعدة البيانات
 ├ /warn - تحذير عضو (بالرد + سبب)
 ├ /unwarn - إزالة تحذيرات عضو
@@ -548,6 +569,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • منع الكلمات المسيئة
 • الترحيب بالأعضاء الجدد
 • الردود التلقائية
+• حفظ الأعضاء في قاعدة بيانات دائمة
 
 📝 *للاستفسار:* @Mik_emm
 """
@@ -561,7 +583,7 @@ async def sync_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if await save_all_members(update.effective_chat.id, context):
             members = get_members(str(update.effective_chat.id))
-            await update.message.reply_text(f"✅ تم مزامنة {len(members)} عضو في قاعدة البيانات.")
+            await update.message.reply_text(f"✅ تم مزامنة {len(members)} عضو في قاعدة البيانات.\n\n💾 البيانات محفوظة بشكل دائم ولن تضيع عند إعادة التشغيل!")
         else:
             await update.message.reply_text("❌ فشل في مزامنة الأعضاء.")
             
@@ -626,10 +648,10 @@ async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await save_all_members(update.effective_chat.id, context)
         
         # ثانياً: جلب الأعضاء من قاعدة البيانات
-        members = get_members(chat_id, limit=1000)
+        members = get_members(chat_id, limit=2000)
 
         if not members:
-            await update.message.reply_text("📭 لا يوجد أعضاء مخزنون في هذه المجموعة.")
+            await update.message.reply_text("📭 لا يوجد أعضاء مخزنون في هذه المجموعة.\nاستخدم /sync أولاً لمزامنة الأعضاء.")
             return
 
         mentions = []
@@ -638,16 +660,18 @@ async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name = username or f"{first_name} {last_name}".strip() or f"user_{user_id}"
             mentions.append(f"[{name}](tg://user?id={user_id})")
         
-        # إرسال المنشن على دفعات مع تأخير
+        # إرسال المنشن على دفعات مع تأخير (20 عضو لكل رسالة)
         total_mentioned = 0
-        for i in range(0, len(mentions), 5):
-            batch = mentions[i:i+5]
+        batch_size = 20
+        
+        for i in range(0, len(mentions), batch_size):
+            batch = mentions[i:i+batch_size]
             message = "📢 منشن لجميع الأعضاء:\n\n" + "\n".join(batch)
             await update.message.reply_text(message, parse_mode="Markdown")
             total_mentioned += len(batch)
             
-            # تأخير 1 ثانية بين كل دفعة لتجنب الحظر
-            await asyncio.sleep(1)
+            # تأخير 2 ثانية بين كل دفعة لتجنب الحظر
+            await asyncio.sleep(2)
         
         await update.message.reply_text(f"✅ تم عمل منشن لـ {total_mentioned} عضو.")
         
@@ -709,7 +733,6 @@ async def unwarn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"Error in unwarn command: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء تنفيذ الأمر.")
-
 @admin_only
 async def get_warns_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -733,7 +756,6 @@ async def get_warns_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in warns command: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء تنفيذ الأمر.")
-
 @admin_only
 async def warn_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -809,6 +831,7 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             await update.message.reply_text(WELCOME_MESSAGES["ar"], parse_mode="Markdown")
             
+            # حفظ العضو في قاعدة البيانات عند الانضمام
             add_member(
                 member.id, 
                 str(update.effective_chat.id),
@@ -937,4 +960,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
