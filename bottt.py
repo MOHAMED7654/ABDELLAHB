@@ -16,21 +16,6 @@ from telegram.ext import (
     CallbackQueryHandler
 )
 
-# محاولة استيراد SimpleConnectionPool من الإصدارات المختلفة
-try:
-    from psycopg_pool import SimpleConnectionPool
-    # للإصدارات الجديدة (psycopg 3)
-    PSYCOPG3 = True
-except ImportError:
-    try:
-        # للإصدارات القديمة (psycopg 2)
-        from psycopg2.pool import SimpleConnectionPool
-        PSYCOPG3 = False
-    except ImportError:
-        # إذا فشل كلاهما
-        SimpleConnectionPool = None
-        PSYCOPG3 = False
-
 # إعدادات اللوغ
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -54,55 +39,39 @@ DB_NAME = "mybotdb_mqjm"
 DB_USER = "mybotuser"
 DB_PASSWORD = "prb09Wv3eU2OhkoeOXyR5n05IBBMEvhn"
 
-# إنشاء connection pool
-connection_pool = None
-
-def init_connection_pool():
-    global connection_pool
-    try:
-        if SimpleConnectionPool is None:
-            logger.error("No connection pool implementation available")
-            return
-            
-        if PSYCOPG3:
-            connection_pool = SimpleConnectionPool(
-                min_size=1,
-                max_size=10,
-                conninfo=DATABASE_URL,
-                autocommit=True
-            )
-        else:
-            connection_pool = SimpleConnectionPool(
-                minconn=1,
-                maxconn=10,
-                dsn=DATABASE_URL,
-                autocommit=True
-            )
-        logger.info("Connection pool initialized successfully")
-    except Exception as e:
-        logger.error(f"Error initializing connection pool: {e}")
-        # Fallback to simple connections
-        connection_pool = None
-
+# اتصال مباشر بدون pool
 @contextmanager
 def get_connection():
-    global connection_pool
-    if connection_pool is None:
-        init_connection_pool()
-    
-    if connection_pool:
-        conn = connection_pool.getconn()
-        try:
-            yield conn
-        finally:
-            connection_pool.putconn(conn)
-    else:
-        # Fallback if pool fails
+    try:
         conn = psycopg.connect(DATABASE_URL, autocommit=True)
         try:
             yield conn
         finally:
             conn.close()
+    except Exception as e:
+        logger.error(f"❌ Error getting connection: {e}")
+        raise
+
+# إصلاح هيكل الجدول إذا كان ناقصاً
+def fix_database_schema():
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                # إضافة العمود إذا لم يكن موجوداً
+                cursor.execute('''
+                DO $$ 
+                BEGIN 
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='members' AND column_name='last_seen'
+                    ) THEN
+                        ALTER TABLE members ADD COLUMN last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                    END IF;
+                END $$;
+                ''')
+                logger.info("✅ Database schema checked and fixed if needed")
+    except Exception as e:
+        logger.error(f"❌ Error fixing database schema: {e}")
 
 # وظائف الاتصال بقاعدة البيانات
 def init_database():
@@ -156,14 +125,19 @@ def init_database():
                     chat_id TEXT NOT NULL,
                     admin_id BIGINT NOT NULL,
                     request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status TEXT DEFAULT 'pending'  -- pending, approved, rejected
+                    status TEXT DEFAULT 'pending'
                 )
                 ''')
         
-        logger.info("Database initialized successfully")
+        logger.info("✅ Database initialized successfully")
+        fix_database_schema()  # إصلاح الهيكل بعد التهيئة
     except Exception as e:
-        logger.error(f"Error initializing database: {e}")
+        logger.error(f"❌ Error initializing database: {e}")
 
+# تهيئة قاعدة البيانات عند التشغيل
+ 
+
+# ... باقي الكود يبقى كما هو بدون تغيير ...
 # إضافة عضو إلى قاعدة البيانات
 def add_member(user_id, chat_id, username, first_name, last_name):
     try:
@@ -962,3 +936,4 @@ def main():
 
 if __name__ == "__main__":
     main()  
+
