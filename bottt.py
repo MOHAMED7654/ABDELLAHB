@@ -2,6 +2,7 @@ import logging
 import json
 import re
 import os
+import asyncio
 import psycopg
 from contextlib import contextmanager
 from datetime import datetime
@@ -65,7 +66,6 @@ def drop_existing_tables():
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                # إسقاط الجداول بالترتيب الصحيح بسبب العلاقات
                 cursor.execute('DROP TABLE IF EXISTS kick_requests CASCADE')
                 cursor.execute('DROP TABLE IF EXISTS warnings CASCADE')
                 cursor.execute('DROP TABLE IF EXISTS members CASCADE')
@@ -81,7 +81,6 @@ def check_database_schema():
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                # التحقق من هيكل جدول الأعضاء
                 cursor.execute('''
                 SELECT column_name, data_type 
                 FROM information_schema.columns 
@@ -92,16 +91,9 @@ def check_database_schema():
                 if result:
                     logger.info(f"Column user_id type: {result[1]}")
                 
-                # التحقق من هيكل جدول التحذيرات
-                cursor.execute('''
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = 'warnings' 
-                AND column_name = 'user_id'
-                ''')
-                result = cursor.fetchone()
-                if result:
-                    logger.info(f"Warnings user_id type: {result[1]}")
+                cursor.execute('SELECT COUNT(*) FROM members')
+                count = cursor.fetchone()[0]
+                logger.info(f"Total members in database: {count}")
                     
     except Exception as e:
         logger.error(f"Error checking schema: {e}")
@@ -111,8 +103,6 @@ def init_database():
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                
-                # جدول الأعضاء - استخدام BIGINT لـ user_id
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS members (
                     id SERIAL PRIMARY KEY,
@@ -127,7 +117,6 @@ def init_database():
                 )
                 ''')
                 
-                # جدول التحذيرات - استخدام BIGINT لـ user_id و admin_id
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS warnings (
                     id SERIAL PRIMARY KEY,
@@ -139,7 +128,6 @@ def init_database():
                 )
                 ''')
                 
-                # جدول الإعدادات
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS settings (
                     id SERIAL PRIMARY KEY,
@@ -150,7 +138,6 @@ def init_database():
                 )
                 ''')
                 
-                # جدول طلبات الطرد - استخدام BIGINT
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS kick_requests (
                     id SERIAL PRIMARY KEY,
@@ -192,8 +179,8 @@ def add_member(user_id, chat_id, username, first_name, last_name):
         logger.error(f"Error adding member {user_id} to database: {e}")
         return False
 
-# الحصول على أعضاء مجموعة محددة
-def get_members(chat_id):
+# الحصول على أعضاء مجموعة محددة مع تحسين الأداء
+def get_members(chat_id, limit=1000):
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
@@ -202,7 +189,8 @@ def get_members(chat_id):
                 FROM members 
                 WHERE chat_id = %s 
                 ORDER BY last_seen DESC
-                ''', (chat_id,))
+                LIMIT %s
+                ''', (chat_id, limit))
                 members = cursor.fetchall()
         
         return members
@@ -478,6 +466,43 @@ def admin_only(handler):
         return await handler(update, context)
     return wrapper
 
+# دالة جديدة: حفظ جميع أعضاء المجموعة في قاعدة البيانات
+async def save_all_members(chat_id, context):
+    """حفظ جميع أعضاء المجموعة في قاعدة البيانات"""
+    try:
+        logger.info(f"⏳ جاري حفظ أعضاء المجموعة {chat_id} في قاعدة البيانات...")
+        
+        members_count = 0
+        try:
+            async for member in context.bot.get_chat_members(chat_id):
+                try:
+                    add_member(
+                        member.user.id,
+                        str(chat_id),
+                        member.user.username,
+                        member.user.first_name,
+                        member.user.last_name
+                    )
+                    members_count += 1
+                    
+                    if members_count % 10 == 0:
+                        await asyncio.sleep(0.1)
+                        
+                except Exception as e:
+                    logger.error(f"Error saving member {member.user.id}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error getting chat members: {e}")
+            return False
+        
+        logger.info(f"✅ تم حفظ {members_count} عضو في قاعدة البيانات")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error in save_all_members: {e}")
+        return False
+
 # ================== الأوامر الأساسية ==================
 
 @admin_only
@@ -488,6 +513,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📌 *أوامر المشرفين:*
 • /admins - عرض قائمة المشرفين
 • /tagall - منشن لجميع الأعضاء
+• /sync - مزامنة الأعضاء مع قاعدة البيانات
 • /warn - تحذير عضو (بالرد على رسالته)
 • /unwarn - إزالة تحذيرات عضو
 • /warns - عرض تحذيرات عضو
@@ -508,6 +534,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👨‍💻 *أوامر الإدارة:*
 ├ /admins - عرض قائمة المشرفين
 ├ /tagall - عمل منشن لجميع الأعضاء
+├ /sync - مزامنة الأعضاء مع قاعدة البيانات
 ├ /warn - تحذير عضو (بالرد + سبب)
 ├ /unwarn - إزالة تحذيرات عضو
 ├ /warns - عرض تحذيرات عضو
@@ -525,6 +552,22 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📝 *للاستفسار:* @Mik_emm
 """
     await update.message.reply_text(help_text, parse_mode="Markdown")
+
+@admin_only
+async def sync_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """مزامنة جميع أعضاء المجموعة مع قاعدة البيانات"""
+    try:
+        await update.message.reply_text("⏳ جاري مزامنة الأعضاء مع قاعدة البيانات...")
+        
+        if await save_all_members(update.effective_chat.id, context):
+            members = get_members(str(update.effective_chat.id))
+            await update.message.reply_text(f"✅ تم مزامنة {len(members)} عضو في قاعدة البيانات.")
+        else:
+            await update.message.reply_text("❌ فشل في مزامنة الأعضاء.")
+            
+    except Exception as e:
+        logger.error(f"Error in sync_members: {e}")
+        await update.message.reply_text("⚠️ حدث خطأ أثناء المزامنة.")
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -577,7 +620,13 @@ async def admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         chat_id = str(update.effective_chat.id)
-        members = get_members(chat_id)
+        
+        # أولاً: حفظ جميع الأعضاء الحاليين في قاعدة البيانات
+        await update.message.reply_text("⏳ جاري تحديث قائمة الأعضاء...")
+        await save_all_members(update.effective_chat.id, context)
+        
+        # ثانياً: جلب الأعضاء من قاعدة البيانات
+        members = get_members(chat_id, limit=1000)
 
         if not members:
             await update.message.reply_text("📭 لا يوجد أعضاء مخزنون في هذه المجموعة.")
@@ -589,12 +638,19 @@ async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name = username or f"{first_name} {last_name}".strip() or f"user_{user_id}"
             mentions.append(f"[{name}](tg://user?id={user_id})")
         
+        # إرسال المنشن على دفعات مع تأخير
+        total_mentioned = 0
         for i in range(0, len(mentions), 5):
             batch = mentions[i:i+5]
             message = "📢 منشن لجميع الأعضاء:\n\n" + "\n".join(batch)
             await update.message.reply_text(message, parse_mode="Markdown")
+            total_mentioned += len(batch)
+            
+            # تأخير 1 ثانية بين كل دفعة لتجنب الحظر
+            await asyncio.sleep(1)
         
-        await update.message.reply_text(f"✅ تم عمل منشن لـ {len(members)} عضو.")
+        await update.message.reply_text(f"✅ تم عمل منشن لـ {total_mentioned} عضو.")
+        
     except Exception as e:
         logger.error(f"Error in tagall: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء عمل المنشن.")
@@ -781,6 +837,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not text:
             return
         
+        # حفظ العضو في قاعدة البيانات عند إرسال أي رسالة
         add_member(
             user.id,
             str(update.effective_chat.id),
@@ -856,6 +913,7 @@ async def on_shutdown(app):
 def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("sync", sync_members))
     application.add_handler(CommandHandler("admins", admins))
     application.add_handler(CommandHandler("tagall", tagall))
     application.add_handler(CommandHandler("warn", warn_user_command))
@@ -879,3 +937,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
