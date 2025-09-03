@@ -134,10 +134,6 @@ def init_database():
     except Exception as e:
         logger.error(f"❌ Error initializing database: {e}")
 
-# تهيئة قاعدة البيانات عند التشغيل
- 
-
-# ... باقي الكود يبقى كما هو بدون تغيير ...
 # إضافة عضو إلى قاعدة البيانات
 def add_member(user_id, chat_id, username, first_name, last_name):
     try:
@@ -359,13 +355,12 @@ def add_kick_request(user_id, chat_id, admin_id):
         return False
 
 # تهيئة قاعدة البيانات عند التشغيل
-init_connection_pool()
 init_database()
 
 # الكلمات الممنوعة - تم تحسينها لتجنب الحذف الخاطئ
 banned_words = {
     " كلب ", " حمار ", " قحب ", " زبي ", " خرا ", " بول ",
-    "ولد الحرam", "ولد القحبة", "يا قحبة", " نيك ", " منيك ",
+    "ولد الحرام", "ولد القحبة", "يا قحبة", " نيك ", " منيك ",
     " مخنث ", " قحبة ", " حقير ", " قذر "
 }
 
@@ -868,7 +863,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text(auto_replies[text])
 
     except Exception as e:
-               logger.error(f"Error in handle_messages: {e}")
+        logger.error(f"Error in handle_messages: {e}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(msg="حدث خطأ في البوت", exc_info=context.error)
@@ -888,28 +883,34 @@ async def webhook_handler(request):
     try:
         data = await request.json()
         update = Update.de_json(data, application.bot)
-        await application.process_update(update)
+               await application.process_update(update)
         return web.Response(text="OK", status=200)
     except Exception as e:
-        logger.error(f"Error in webhook handler: {e}")
+        logger.error(f"Error processing webhook update: {e}")
         return web.Response(text="Error", status=500)
 
 async def set_webhook():
-    await application.bot.set_webhook(
-        url=WEBHOOK_URL,
-        secret_token=SECRET_TOKEN,
-        drop_pending_updates=True
-    )
-    logger.info("Webhook set successfully")
+    try:
+        await application.bot.set_webhook(
+            url=WEBHOOK_URL,
+            secret_token=SECRET_TOKEN,
+            drop_pending_updates=True
+        )
+        logger.info("✅ Webhook set successfully")
+    except Exception as e:
+        logger.error(f"❌ Error setting webhook: {e}")
 
-async def on_startup(app):
-    await application.initialize()
-    await set_webhook()
-    await application.start()
-    logger.info("Bot started successfully with webhook!")
+async def remove_webhook():
+    try:
+        await application.bot.delete_webhook()
+        logger.info("✅ Webhook removed successfully")
+    except Exception as e:
+        logger.error(f"❌ Error removing webhook: {e}")
+
+# ================== التشغيل الرئيسي ==================
 
 def main():
-    # إضافة جميع handlers
+    # إضافة المعالجات
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admins", admins))
@@ -921,19 +922,35 @@ def main():
     application.add_handler(CommandHandler("setwarns", set_max_warns))
     application.add_handler(CommandHandler("delete_links", delete_links_setting))
     application.add_handler(CommandHandler("ping", ping))
+    
     application.add_handler(CallbackQueryHandler(callback_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
+    
     application.add_error_handler(error_handler)
 
-    # إعداد ويب هوك
-    web_app = web.Application()
-    web_app.router.add_post('/webhook', webhook_handler)
-    web_app.on_startup.append(on_startup)
-
-    # تشغيل الخادم
-    web.run_app(web_app, host='0.0.0.0', port=PORT)
+    # تشغيل البوت
+    if os.environ.get('RENDER', None):
+        # تشغيل على Render مع ويب هوك
+        logger.info("🚀 Starting bot in webhook mode...")
+        app = web.Application()
+        app.router.add_post('/webhook', webhook_handler)
+        
+        async def on_startup(app):
+            await set_webhook()
+        
+        app.on_startup.append(on_startup)
+        
+        web.run_app(
+            app,
+            host='0.0.0.0',
+            port=PORT,
+            ssl_context=None
+        )
+    else:
+        # تشغيل محلي مع polling
+        logger.info("🚀 Starting bot in polling mode...")
+        application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    main()  
-
+    main()
