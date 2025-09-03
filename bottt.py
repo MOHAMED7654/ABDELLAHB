@@ -466,49 +466,82 @@ def admin_only(handler):
         return await handler(update, context)
     return wrapper
 
+# وظيفة جديدة لجلب جميع الأعضاء باستخدام Telegram API
+async def get_all_chat_members(chat_id, context):
+    """جلب جميع أعضاء المجموعة باستخدام Telegram API"""
+    try:
+        members_count = await context.bot.get_chat_members_count(chat_id)
+        logger.info(f"📊 العدد الإجمالي لأعضاء المجموعة: {members_count}")
+        
+        all_members = []
+        offset = 0
+        limit = 200  # الحد الأقصى المسموح به من قبل Telegram API
+        
+        while offset < members_count:
+            try:
+                # جلب مجموعة من الأعضاء
+                members_chunk = await context.bot.get_chat_members(chat_id, offset=offset, limit=limit)
+                
+                for member in members_chunk:
+                    user = member.user
+                    if not user.is_bot:  # تجاهل البوتات
+                        all_members.append({
+                            'user_id': user.id,
+                            'username': user.username,
+                            'first_name': user.first_name,
+                            'last_name': user.last_name
+                        })
+                
+                offset += limit
+                logger.info(f"✅ تم جلب {len(members_chunk)} عضو، الإجمالي حتى الآن: {len(all_members)}")
+                
+                # تأخير لتجنب حظر Telegram API
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                logger.error(f"❌ خطأ في جلب مجموعة الأعضاء: {e}")
+                break
+        
+        logger.info(f"✅ تم جلب جميع الأعضاء بنجاح، العدد الإجمالي: {len(all_members)}")
+        return all_members
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في جلب عدد الأعضاء: {e}")
+        return []
+
 async def save_all_members(chat_id, context):
     """حفظ جميع أعضاء المجموعة في قاعدة البيانات"""
     try:
         logger.info(f"⏳ جاري معالجة أعضاء المجموعة {chat_id}...")
         
-        # 1. جلب الأعضاء الموجودين أساساً في PostgreSQL
-        existing_members = get_members(str(chat_id), limit=5000)
-        initial_count = len(existing_members) if existing_members else 0
+        # 1. جلب جميع أعضاء المجموعة باستخدام Telegram API
+        all_members = await get_all_chat_members(chat_id, context)
         
-        logger.info(f"📊 العدد الأساسي للأعضاء المسجلين: {initial_count}")
+        if not all_members:
+            logger.error("❌ لم يتم جلب أي أعضاء من المجموعة")
+            return False
         
-        # 2. إضافة المشرفين الجدد (إذا لم يكونوا مسجلين)
-        try:
-            admins = await context.bot.get_chat_administrators(chat_id)
-            new_admins_count = 0
-            
-            for admin in admins:
-                try:
-                    add_member(
-                        admin.user.id,
-                        str(chat_id),
-                        admin.user.username,
-                        admin.user.first_name,
-                        admin.user.last_name
-                    )
-                    new_admins_count += 1
-                except Exception as e:
-                    continue
-            
-            logger.info(f"➕ تمت إضافة {new_admins_count} مشرف جديد")
-            
-        except Exception as e:
-            logger.error(f"Error getting admins: {e}")
+        # 2. حفظ جميع الأعضاء في قاعدة البيانات
+        saved_count = 0
+        for member in all_members:
+            try:
+                add_member(
+                    member['user_id'],
+                    str(chat_id),
+                    member['username'],
+                    member['first_name'],
+                    member['last_name']
+                )
+                saved_count += 1
+            except Exception as e:
+                logger.error(f"❌ خطأ في حفظ العضو {member['user_id']}: {e}")
+                continue
         
-        # 3. الحصول على العدد النهائي بعد كل العمليات
-        final_members = get_members(str(chat_id), limit=5000)
-        final_count = len(final_members) if final_members else 0
-        
-        logger.info(f"✅ العدد النهائي للأعضاء: {final_count} عضو (كانوا {initial_count})")
-        return final_count > 0
+        logger.info(f"✅ تم حفظ {saved_count} عضو في قاعدة البيانات")
+        return saved_count > 0
         
     except Exception as e:
-        logger.error(f"Error in save_all_members: {e}")
+        logger.error(f"❌ Error in save_all_members: {e}")
         return False
 
 # ================== الأوامر الأساسية ==================
