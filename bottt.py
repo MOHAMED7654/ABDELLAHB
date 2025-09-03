@@ -2,8 +2,8 @@ import logging
 import json
 import re
 import os
-import psycopg2
-import psycopg2.extras
+import psycopg
+from psycopg import sql
 from datetime import datetime
 from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -34,88 +34,84 @@ DATABASE_URL = "postgresql://mybotuser:prb09Wv3eU2OhkoeOXyR5n05IBBMEvhn@dpg-d2s5
 
 # وظائف الاتصال بقاعدة البيانات
 def get_connection():
-    return psycopg2.connect(DATABASE_URL, sslmode='require')
+    return psycopg.connect(DATABASE_URL, autocommit=True)
 
 def init_database():
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        
+        # جدول الأعضاء
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS members (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            chat_id TEXT NOT NULL,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, chat_id)
+        )
+        ''')
+        
+        # جدول التحذيرات
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS warnings (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            chat_id TEXT NOT NULL,
+            reason TEXT,
+            warning_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            admin_id INTEGER
+        )
+        ''')
+        
+        # جدول الإعدادات
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            id SERIAL PRIMARY KEY,
+            chat_id TEXT UNIQUE NOT NULL,
+            max_warns INTEGER DEFAULT 3,
+            delete_links BOOLEAN DEFAULT TRUE,
+            youtube_channel TEXT DEFAULT '@Mik_emm'
+        )
+        ''')
+        
+        # جدول طلبات الطرد
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS kick_requests (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            chat_id TEXT NOT NULL,
+            admin_id INTEGER NOT NULL,
+            request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'pending'  -- pending, approved, rejected
+        )
+        ''')
     
-    # جدول الأعضاء
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS members (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        chat_id TEXT NOT NULL,
-        username TEXT,
-        first_name TEXT,
-        last_name TEXT,
-        joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, chat_id)
-    )
-    ''')
-    
-    # جدول التحذيرات
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS warnings (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        chat_id TEXT NOT NULL,
-        reason TEXT,
-        warning_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        admin_id INTEGER
-    )
-    ''')
-    
-    # جدول الإعدادات
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS settings (
-        id SERIAL PRIMARY KEY,
-        chat_id TEXT UNIQUE NOT NULL,
-        max_warns INTEGER DEFAULT 3,
-        delete_links BOOLEAN DEFAULT TRUE,
-        youtube_channel TEXT DEFAULT '@Mik_emm'
-    )
-    ''')
-    
-    # جدول طلبات الطرد
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS kick_requests (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        chat_id TEXT NOT NULL,
-        admin_id INTEGER NOT NULL,
-        request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        status TEXT DEFAULT 'pending'  -- pending, approved, rejected
-    )
-    ''')
-    
-    conn.commit()
     conn.close()
 
 # إضافة عضو إلى قاعدة البيانات
 def add_member(user_id, chat_id, username, first_name, last_name):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+        INSERT INTO members (user_id, chat_id, username, first_name, last_name)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, chat_id) DO UPDATE SET
+        username = EXCLUDED.username,
+        first_name = EXCLUDED.first_name,
+        last_name = EXCLUDED.last_name
+        ''', (user_id, chat_id, username, first_name, last_name))
     
-    cursor.execute('''
-    INSERT INTO members (user_id, chat_id, username, first_name, last_name)
-    VALUES (%s, %s, %s, %s, %s)
-    ON CONFLICT (user_id, chat_id) DO UPDATE SET
-    username = EXCLUDED.username,
-    first_name = EXCLUDED.first_name,
-    last_name = EXCLUDED.last_name
-    ''', (user_id, chat_id, username, first_name, last_name))
-    
-    conn.commit()
     conn.close()
 
 # الحصول على أعضاء مجموعة محددة
 def get_members(chat_id):
     conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT user_id FROM members WHERE chat_id = %s', (chat_id,))
-    members = [row[0] for row in cursor.fetchall()]
+    with conn.cursor() as cursor:
+        cursor.execute('SELECT user_id FROM members WHERE chat_id = %s', (chat_id,))
+        members = [row[0] for row in cursor.fetchall()]
     
     conn.close()
     return members
@@ -123,90 +119,87 @@ def get_members(chat_id):
 # إضافة تحذير
 def add_warning(user_id, chat_id, reason, admin_id=None):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+        INSERT INTO warnings (user_id, chat_id, reason, admin_id)
+        VALUES (%s, %s, %s, %s)
+        ''', (user_id, chat_id, reason, admin_id))
     
-    cursor.execute('''
-    INSERT INTO warnings (user_id, chat_id, reason, admin_id)
-    VALUES (%s, %s, %s, %s)
-    ''', (user_id, chat_id, reason, admin_id))
-    
-    conn.commit()
     conn.close()
 
 # الحصول على عدد التحذيرات
 def get_warning_count(user_id, chat_id):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+        SELECT COUNT(*) FROM warnings 
+        WHERE user_id = %s AND chat_id = %s
+        ''', (user_id, chat_id))
+        
+        count = cursor.fetchone()[0]
     
-    cursor.execute('''
-    SELECT COUNT(*) FROM warnings 
-    WHERE user_id = %s AND chat_id = %s
-    ''', (user_id, chat_id))
-    
-    count = cursor.fetchone()[0]
     conn.close()
     return count
 
 # الحصول على أسباب التحذيرات
 def get_warning_reasons(user_id, chat_id):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+        SELECT reason, warning_date FROM warnings 
+        WHERE user_id = %s AND chat_id = %s
+        ORDER BY warning_date DESC
+        ''', (user_id, chat_id))
+        
+        reasons = cursor.fetchall()
     
-    cursor.execute('''
-    SELECT reason, warning_date FROM warnings 
-    WHERE user_id = %s AND chat_id = %s
-    ORDER BY warning_date DESC
-    ''', (user_id, chat_id))
-    
-    reasons = cursor.fetchall()
     conn.close()
     return reasons
 
 # إزالة جميع تحذيرات العضو
 def reset_warnings(user_id, chat_id):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+        DELETE FROM warnings 
+        WHERE user_id = %s AND chat_id = %s
+        ''', (user_id, chat_id))
+        
+        affected = cursor.rowcount
     
-    cursor.execute('''
-    DELETE FROM warnings 
-    WHERE user_id = %s AND chat_id = %s
-    ''', (user_id, chat_id))
-    
-    conn.commit()
-    affected = cursor.rowcount
     conn.close()
     return affected > 0
 
 # الحصول على قائمة المحذرين
 def get_warned_members(chat_id):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+        SELECT user_id, COUNT(*) as warn_count 
+        FROM warnings 
+        WHERE chat_id = %s 
+        GROUP BY user_id 
+        HAVING COUNT(*) > 0
+        ORDER BY warn_count DESC
+        ''', (chat_id,))
+        
+        warned_members = cursor.fetchall()
     
-    cursor.execute('''
-    SELECT user_id, COUNT(*) as warn_count 
-    FROM warnings 
-    WHERE chat_id = %s 
-    GROUP BY user_id 
-    HAVING COUNT(*) > 0
-    ORDER BY warn_count DESC
-    ''', (chat_id,))
-    
-    warned_members = cursor.fetchall()
     conn.close()
     return warned_members
 
 # الحصول على إعدادات المجموعة
 def get_chat_settings(chat_id):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+        SELECT max_warns, delete_links, youtube_channel 
+        FROM settings 
+        WHERE chat_id = %s
+        ''', (chat_id,))
+        
+        settings = cursor.fetchone()
     
-    cursor.execute('''
-    SELECT max_warns, delete_links, youtube_channel 
-    FROM settings 
-    WHERE chat_id = %s
-    ''', (chat_id,))
-    
-    settings = cursor.fetchone()
     conn.close()
     
     if settings:
@@ -226,57 +219,53 @@ def get_chat_settings(chat_id):
 # حفظ إعدادات المجموعة
 def save_chat_settings(chat_id, max_warns=None, delete_links=None, youtube_channel=None):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        # التحقق من وجود الإعدادات
+        cursor.execute('SELECT chat_id FROM settings WHERE chat_id = %s', (chat_id,))
+        exists = cursor.fetchone()
+        
+        if exists:
+            # تحديث الإعدادات الحالية
+            update_fields = []
+            params = []
+            
+            if max_warns is not None:
+                update_fields.append("max_warns = %s")
+                params.append(max_warns)
+            
+            if delete_links is not None:
+                update_fields.append("delete_links = %s")
+                params.append(delete_links)
+            
+            if youtube_channel is not None:
+                update_fields.append("youtube_channel = %s")
+                params.append(youtube_channel)
+            
+            if update_fields:
+                params.append(chat_id)
+                cursor.execute(f'''
+                UPDATE settings 
+                SET {', '.join(update_fields)} 
+                WHERE chat_id = %s
+                ''', params)
+        else:
+            # إدخال إعدادات جديدة
+            cursor.execute('''
+            INSERT INTO settings (chat_id, max_warns, delete_links, youtube_channel)
+            VALUES (%s, %s, %s, %s)
+            ''', (chat_id, max_warns or 40, delete_links or True, youtube_channel or "@Mik_emm"))
     
-    # التحقق من وجود الإعدادات
-    cursor.execute('SELECT chat_id FROM settings WHERE chat_id = %s', (chat_id,))
-    exists = cursor.fetchone()
-    
-    if exists:
-        # تحديث الإعدادات الحالية
-        update_fields = []
-        params = []
-        
-        if max_warns is not None:
-            update_fields.append("max_warns = %s")
-            params.append(max_warns)
-        
-        if delete_links is not None:
-            update_fields.append("delete_links = %s")
-            params.append(delete_links)
-        
-        if youtube_channel is not None:
-            update_fields.append("youtube_channel = %s")
-            params.append(youtube_channel)
-        
-        if update_fields:
-            params.append(chat_id)
-            cursor.execute(f'''
-            UPDATE settings 
-            SET {', '.join(update_fields)} 
-            WHERE chat_id = %s
-            ''', params)
-    else:
-        # إدخال إعدادات جديدة
-        cursor.execute('''
-        INSERT INTO settings (chat_id, max_warns, delete_links, youtube_channel)
-        VALUES (%s, %s, %s, %s)
-        ''', (chat_id, max_warns or 40, delete_links or True, youtube_channel or "@Mik_emm"))
-    
-    conn.commit()
     conn.close()
 
 # إضافة طلب طرد
 def add_kick_request(user_id, chat_id, admin_id):
     conn = get_connection()
-    cursor = conn.cursor()
+    with conn.cursor() as cursor:
+        cursor.execute('''
+        INSERT INTO kick_requests (user_id, chat_id, admin_id)
+        VALUES (%s, %s, %s)
+        ''', (user_id, chat_id, admin_id))
     
-    cursor.execute('''
-    INSERT INTO kick_requests (user_id, chat_id, admin_id)
-    VALUES (%s, %s, %s)
-    ''', (user_id, chat_id, admin_id))
-    
-    conn.commit()
     conn.close()
 
 # تهيئة قاعدة البيانات عند التشغيل
