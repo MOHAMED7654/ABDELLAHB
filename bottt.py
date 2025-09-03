@@ -471,10 +471,10 @@ async def save_all_members(chat_id, context):
         logger.info(f"⏳ جاري معالجة أعضاء المجموعة {chat_id}...")
         
         # 1. جلب الأعضاء الموجودين أساساً في PostgreSQL
-        existing_members = get_members(str(chat_id), limit=1000)
-        members_count = len(existing_members) if existing_members else 0
+        existing_members = get_members(str(chat_id), limit=5000)  # زيادة الحد إلى 5000
+        initial_count = len(existing_members) if existing_members else 0
         
-        logger.info(f"📊 العدد الأساسي للأعضاء المسجلين: {members_count}")
+        logger.info(f"📊 العدد الأساسي للأعضاء المسجلين: {initial_count}")
         
         # 2. إضافة المشرفين الجدد (إذا لم يكونوا مسجلين)
         try:
@@ -483,7 +483,6 @@ async def save_all_members(chat_id, context):
             
             for admin in admins:
                 try:
-                    # هذه الدالة تستخدم ON CONFLICT DO UPDATE فلا تضيف مكررات
                     add_member(
                         admin.user.id,
                         str(chat_id),
@@ -493,7 +492,6 @@ async def save_all_members(chat_id, context):
                     )
                     new_admins_count += 1
                 except Exception as e:
-                    logger.error(f"Error saving admin {admin.user.id}: {e}")
                     continue
             
             logger.info(f"➕ تمت إضافة {new_admins_count} مشرف جديد")
@@ -502,10 +500,10 @@ async def save_all_members(chat_id, context):
             logger.error(f"Error getting admins: {e}")
         
         # 3. الحصول على العدد النهائي بعد كل العمليات
-        final_members = get_members(str(chat_id), limit=1000)
+        final_members = get_members(str(chat_id), limit=5000)  # زيادة الحد إلى 5000
         final_count = len(final_members) if final_members else 0
         
-        logger.info(f"✅ العدد النهائي للأعضاء: {final_count} عضو")
+        logger.info(f"✅ العدد النهائي للأعضاء: {final_count} عضو (كانوا {initial_count})")
         return final_count > 0
         
     except Exception as e:
@@ -947,6 +945,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
