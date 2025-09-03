@@ -60,6 +60,36 @@ def test_connection():
         logger.error(f"❌ Database connection test failed: {e}")
         return False
 
+# التحقق من هيكل الجداول
+def check_database_schema():
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                # التحقق من هيكل جدول الأعضاء
+                cursor.execute('''
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'members' 
+                AND column_name = 'user_id'
+                ''')
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"Column user_id type: {result[1]}")
+                
+                # التحقق من هيكل جدول التحذيرات
+                cursor.execute('''
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'warnings' 
+                AND column_name = 'user_id'
+                ''')
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"Warnings user_id type: {result[1]}")
+                    
+    except Exception as e:
+        logger.error(f"Error checking schema: {e}")
+
 # إصلاح هيكل الجدول إذا كان ناقصاً
 def fix_database_schema():
     try:
@@ -142,14 +172,12 @@ def init_database():
     except Exception as e:
         logger.error(f"❌ Error initializing database: {e}")
 
-# إضافة عضو إلى قاعدة البيانات
+# إضافة عضو إلى قاعدة البيانات - استخدام النص مؤقتاً
 def add_member(user_id, chat_id, username, first_name, last_name):
     try:
-        # تحقق من صحة البيانات
-        if not isinstance(user_id, int) or user_id <= 0:
-            logger.error(f"Invalid user_id: {user_id}")
-            return False
-            
+        # تحويل user_id إلى نص مؤقتاً للتغلب على المشكلة
+        user_id_str = str(user_id)
+        
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
@@ -160,7 +188,7 @@ def add_member(user_id, chat_id, username, first_name, last_name):
                 first_name = EXCLUDED.first_name,
                 last_name = EXCLUDED.last_name,
                 last_seen = CURRENT_TIMESTAMP
-                ''', (user_id, chat_id, username, first_name, last_name))
+                ''', (user_id_str, chat_id, username, first_name, last_name))
         
         logger.debug(f"Member {user_id} added/updated in chat {chat_id}")
         return True
@@ -189,15 +217,18 @@ def get_members(chat_id):
         logger.error(f"Error getting members for chat {chat_id}: {e}")
         return []
 
-# إضافة تحذير
+# إضافة تحذير - استخدام النص مؤقتاً
 def add_warning(user_id, chat_id, reason, admin_id=None):
     try:
+        user_id_str = str(user_id)  # تحويل إلى نص
+        admin_id_str = str(admin_id) if admin_id else None
+        
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
                 INSERT INTO warnings (user_id, chat_id, reason, admin_id)
                 VALUES (%s, %s, %s, %s)
-                ''', (user_id, chat_id, reason, admin_id))
+                ''', (user_id_str, chat_id, reason, admin_id_str))
         
         logger.info(f"Warning added for user {user_id} in chat {chat_id}")
         return True
@@ -205,15 +236,16 @@ def add_warning(user_id, chat_id, reason, admin_id=None):
         logger.error(f"Error adding warning for user {user_id}: {e}")
         return False
 
-# الحصول على عدد التحذيرات
+# الحصول على عدد التحذيرات - استخدام النص مؤقتاً
 def get_warning_count(user_id, chat_id):
     try:
+        user_id_str = str(user_id)
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
                 SELECT COUNT(*) FROM warnings 
                 WHERE user_id = %s AND chat_id = %s
-                ''', (user_id, chat_id))
+                ''', (user_id_str, chat_id))
                 count = cursor.fetchone()[0]
         
         return count
@@ -221,9 +253,10 @@ def get_warning_count(user_id, chat_id):
         logger.error(f"Error getting warning count for user {user_id}: {e}")
         return 0
 
-# الحصول على أسباب التحذيرات
+# الحصول على أسباب التحذيرات - استخدام النص مؤقتاً
 def get_warning_reasons(user_id, chat_id):
     try:
+        user_id_str = str(user_id)
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
@@ -231,7 +264,7 @@ def get_warning_reasons(user_id, chat_id):
                 FROM warnings 
                 WHERE user_id = %s AND chat_id = %s
                 ORDER BY warning_date DESC
-                ''', (user_id, chat_id))
+                ''', (user_id_str, chat_id))
                 reasons = cursor.fetchall()
         
         return reasons
@@ -239,15 +272,16 @@ def get_warning_reasons(user_id, chat_id):
         logger.error(f"Error getting warning reasons for user {user_id}: {e}")
         return []
 
-# إزالة جميع تحذيرات العضو
+# إزالة جميع تحذيرات العضو - استخدام النص مؤقتاً
 def reset_warnings(user_id, chat_id):
     try:
+        user_id_str = str(user_id)
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
                 DELETE FROM warnings 
                 WHERE user_id = %s AND chat_id = %s
-                ''', (user_id, chat_id))
+                ''', (user_id_str, chat_id))
                 affected = cursor.rowcount
         
         logger.info(f"Warnings reset for user {user_id} in chat {chat_id}")
@@ -355,15 +389,18 @@ def save_chat_settings(chat_id, max_warns=None, delete_links=None, youtube_chann
         logger.error(f"Error saving settings for chat {chat_id}: {e}")
         return False
 
-# إضافة طلب طرد
+# إضافة طلب طرد - استخدام النص مؤقتاً
 def add_kick_request(user_id, chat_id, admin_id):
     try:
+        user_id_str = str(user_id)
+        admin_id_str = str(admin_id)
+        
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
                 INSERT INTO kick_requests (user_id, chat_id, admin_id)
                 VALUES (%s, %s, %s)
-                ''', (user_id, chat_id, admin_id))
+                ''', (user_id_str, chat_id, admin_id_str))
         
         return True
     except Exception as e:
@@ -373,6 +410,9 @@ def add_kick_request(user_id, chat_id, admin_id):
 # تهيئة قاعدة البيانات عند التشغيل
 test_connection()
 init_database()
+check_database_schema()  # التحقق من هيكل الجداول
+
+# ... (بقية الكود يبقى كما هو بدون تغيير) ...
 
 # الكلمات الممنوعة - تم تحسينها لتجنب الحذف الخاطئ
 banned_words = {
@@ -897,3 +937,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
