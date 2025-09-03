@@ -441,6 +441,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("❌ لم يتم العثور على اشتراكك. يرجى الاشتراك أولاً.")
     elif query.data.startswith("kick_"):
+        # التحقق من أن المستخدم مشرف
+        try:
+            user_status = await context.bot.get_chat_member(query.message.chat.id, query.from_user.id)
+            if user_status.status not in ["administrator", "creator"]:
+                await query.edit_message_text("❌ هذا الزر للمشرفين فقط!")
+                return
+        except Exception as e:
+            logger.error(f"Error checking admin status in callback: {e}")
+            await query.edit_message_text("❌ حدث خطأ أثناء التحقق من الصلاحيات!")
+            return
+        
         # معالجة طلبات الطرد
         parts = query.data.split("_")
         action = parts[1]
