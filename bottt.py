@@ -1,4 +1,4 @@
-import logging
+ import logging
 import json
 import re
 import os
@@ -32,13 +32,6 @@ PORT = int(os.environ.get('PORT', 8443))
 # بيانات قاعدة البيانات PostgreSQL
 DATABASE_URL = "postgresql://mybotuser:prb09Wv3eU2OhkoeOXyR5n05IBBMEvhn@dpg-d2s5g4m3jp1c738svjfg-a.frankfurt-postgres.render.com/mybotdb_mqjm"
 
-# معلومات الاتصال الإضافية
-DB_HOST = "dpg-d2s5g4m3jp1c738svjfg-a.frankfurt-postgres.render.com"
-DB_PORT = 5432
-DB_NAME = "mybotdb_mqjm"
-DB_USER = "mybotuser"
-DB_PASSWORD = "prb09Wv3eU2OhkoeOXyR5n05IBBMEvhn"
-
 # اتصال مباشر بدون pool
 @contextmanager
 def get_connection():
@@ -48,9 +41,24 @@ def get_connection():
             yield conn
         finally:
             conn.close()
+    except psycopg.Error as e:
+        logger.error(f"❌ PostgreSQL Error: {e}")
+        raise
     except Exception as e:
         logger.error(f"❌ Error getting connection: {e}")
         raise
+
+# اختبار الاتصال بقاعدة البيانات
+def test_connection():
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT 1')
+                logger.info("✅ Database connection test successful")
+                return True
+    except Exception as e:
+        logger.error(f"❌ Database connection test failed: {e}")
+        return False
 
 # إصلاح هيكل الجدول إذا كان ناقصاً
 def fix_database_schema():
@@ -79,7 +87,7 @@ def init_database():
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 
-                # جدول الأعضاء
+                # جدول الأعضاء - استخدام BIGINT لـ user_id
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS members (
                     id SERIAL PRIMARY KEY,
@@ -94,7 +102,7 @@ def init_database():
                 )
                 ''')
                 
-                # جدول التحذيرات
+                # جدول التحذيرات - استخدام BIGINT لـ user_id و admin_id
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS warnings (
                     id SERIAL PRIMARY KEY,
@@ -117,7 +125,7 @@ def init_database():
                 )
                 ''')
                 
-                # جدول طلبات الطرد
+                # جدول طلبات الطرد - استخدام BIGINT
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS kick_requests (
                     id SERIAL PRIMARY KEY,
@@ -137,6 +145,11 @@ def init_database():
 # إضافة عضو إلى قاعدة البيانات
 def add_member(user_id, chat_id, username, first_name, last_name):
     try:
+        # تحقق من صحة البيانات
+        if not isinstance(user_id, int) or user_id <= 0:
+            logger.error(f"Invalid user_id: {user_id}")
+            return False
+            
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
@@ -151,6 +164,9 @@ def add_member(user_id, chat_id, username, first_name, last_name):
         
         logger.debug(f"Member {user_id} added/updated in chat {chat_id}")
         return True
+    except psycopg.Error as e:
+        logger.error(f"PostgreSQL Error adding member {user_id}: {e}")
+        return False
     except Exception as e:
         logger.error(f"Error adding member {user_id} to database: {e}")
         return False
@@ -355,6 +371,7 @@ def add_kick_request(user_id, chat_id, admin_id):
         return False
 
 # تهيئة قاعدة البيانات عند التشغيل
+test_connection()
 init_database()
 
 # الكلمات الممنوعة - تم تحسينها لتجنب الحذف الخاطئ
@@ -857,13 +874,12 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 except Exception as e:
                     logger.error(f"Error handling banned word: {e}")
+# الردود التلقائية
+if text in auto_replies:
+    await message.reply_text(auto_replies[text])
 
-        # الردود التلقائية
-        if text in auto_replies:
-            await message.reply_text(auto_replies[text])
-
-    except Exception as e:
-        logger.error(f"Error in handle_messages: {e}")
+except Exception as e:
+    logger.error(f"Error in handle_messages: {e}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(msg="حدث خطأ في البوت", exc_info=context.error)
@@ -872,7 +888,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_message.reply_text("⚠️ حدث خطأ غير متوقع في البوت. يرجى المحاولة لاحقاً.")
         except:
             pass
-
 # ================== ويب هوك ==================
 
 async def webhook_handler(request):
