@@ -780,100 +780,6 @@ def contains_banned_word(text):
         if word.strip().lower() in text:
             return True
     return False
-
-async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if update.effective_chat.type == "private":
-            return
-        
-        message = update.message
-        chat_id = str(update.effective_chat.id)
-        user_id = update.effective_user.id
-        text = message.text or ""
-        is_adm = await is_admin(update, context)
-
-        # تسجيل المستخدم في قاعدة البيانات
-        add_member(
-            user_id,
-            chat_id,
-            update.effective_user.username,
-            update.effective_user.first_name,
-            update.effective_user.last_name
-        )
-
-        # حذف الروابط
-        settings = get_chat_settings(chat_id)
-        if settings["delete_links"]:
-            if re.search(r'(https?://\S+|www\.\S+)', text):
-                if not is_adm:
-                    try:
-                        await message.delete()
-                        warn_count = await warn_user(chat_id, user_id, "نشر روابط", context.bot.id)
-                        max_warns = settings["max_warns"]
-                        
-                        warning_msg = f"🚫 {update.effective_user.mention_html()} الروابط غير مسموح بها!"
-                        if warn_count >= max_warns:
-                            # إرسال طلب تأكيد الطرد
-                            keyboard = [
-                                [
-                                    InlineKeyboardButton("✅ نعم، طرده", callback_data=f"kick_approve_{user_id}_{chat_id}"),
-                                    InlineKeyboardButton("❌ لا، إلغاء", callback_data=f"kick_reject_{user_id}_{chat_id}")
-                                ]
-                            ]
-                            
-                            warning_msg += f"\n⚠️ وصل إلى حد التحذيرات ({warn_count}/{max_warns})"
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=warning_msg,
-                                parse_mode="HTML",
-                                reply_markup=InlineKeyboardMarkup(keyboard)
-                            )
-                        else:
-                            warning_msg += f"\n⚠️ تحذير ({warn_count}/{max_warns})"
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=warning_msg,
-                                parse_mode="HTML"
-                            )
-                        return
-                    except Exception as e:
-                        logger.error(f"Error deleting link: {e}")
-
-        # منع الكلمات المسيئة
-        if contains_banned_word(text):
-            if not is_adm:
-                try:
-                    await message.delete()
-                    warn_count = await warn_user(chat_id, user_id, "كلمة مسيئة", context.bot.id)
-                    max_warns = settings["max_warns"]
-                    
-                    warning_msg = f"🚫 {update.effective_user.mention_html()} الكلمات المسيئة ممنوعة!"
-                    if warn_count >= max_warns:
-                        # إرسال طلب تأكيد الطرد
-                        keyboard = [
-                            [
-                                InlineKeyboardButton("✅ نعم، طرده", callback_data=f"kick_approve_{user_id}_{chat_id}"),
-                                InlineKeyboardButton("❌ لا، إلغاء", callback_data=f"kick_reject_{user_id}_{chat_id}")
-                            ]
-                        ]
-                        
-                        warning_msg += f"\n⚠️ وصل إلى حد التحذيرات ({warn_count}/{max_warns})"
-                        await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=warning_msg,
-                            parse_mode="HTML",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                    else:
-                        warning_msg += f"\n⚠️ تحذير ({warn_count}/{max_warns})"
-                        await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=warning_msg,
-                            parse_mode="HTML"
-                        )
-                    return
-                except Exception as e:
-                    logger.error(f"Error handling banned word: {e}")
 # الردود التلقائية
 if text in auto_replies:
     await message.reply_text(auto_replies[text])
@@ -955,4 +861,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
