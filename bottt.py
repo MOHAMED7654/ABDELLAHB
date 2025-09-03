@@ -465,13 +465,14 @@ def admin_only(handler):
             return
         return await handler(update, context)
     return wrapper
+
 async def save_all_members(chat_id, context):
     """حفظ جميع أعضاء المجموعة في قاعدة البيانات"""
     try:
         logger.info(f"⏳ جاري معالجة أعضاء المجموعة {chat_id}...")
         
         # 1. جلب الأعضاء الموجودين أساساً في PostgreSQL
-        existing_members = get_members(str(chat_id), limit=5000)  # زيادة الحد إلى 5000
+        existing_members = get_members(str(chat_id), limit=5000)
         initial_count = len(existing_members) if existing_members else 0
         
         logger.info(f"📊 العدد الأساسي للأعضاء المسجلين: {initial_count}")
@@ -500,7 +501,7 @@ async def save_all_members(chat_id, context):
             logger.error(f"Error getting admins: {e}")
         
         # 3. الحصول على العدد النهائي بعد كل العمليات
-        final_members = get_members(str(chat_id), limit=5000)  # زيادة الحد إلى 5000
+        final_members = get_members(str(chat_id), limit=5000)
         final_count = len(final_members) if final_members else 0
         
         logger.info(f"✅ العدد النهائي للأعضاء: {final_count} عضو (كانوا {initial_count})")
@@ -509,6 +510,7 @@ async def save_all_members(chat_id, context):
     except Exception as e:
         logger.error(f"Error in save_all_members: {e}")
         return False
+
 # ================== الأوامر الأساسية ==================
 
 @admin_only
@@ -718,6 +720,7 @@ async def unwarn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"Error in unwarn command: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء تنفيذ الأمر.")
+
 @admin_only
 async def get_warns_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -741,6 +744,7 @@ async def get_warns_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in warns command: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء تنفيذ الأمر.")
+
 @admin_only
 async def warn_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -919,6 +923,7 @@ async def on_shutdown(app):
     logger.info("Bot stopped successfully!")
 
 def main():
+    # إضافة handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("sync", sync_members))
@@ -945,7 +950,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
