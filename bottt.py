@@ -786,9 +786,19 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         message = update.message
         text = message.text
+        user = message.from_user  # إضافة هذا السطر
         
         if not text:
             return
+        
+        # تسجيل المستخدم في قاعدة البيانات عند إرسال رسالة - أضف هذه الأسطر
+        add_member(
+            user.id,
+            str(update.effective_chat.id),
+            user.username,
+            user.first_name,
+            user.last_name
+        )
         
         # التحقق من الكلمات الممنوعة
         if contains_banned_word(text):
