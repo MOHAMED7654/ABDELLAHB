@@ -780,12 +780,37 @@ def contains_banned_word(text):
         if word.strip().lower() in text:
             return True
     return False
-# الردود التلقائية
-if text in auto_replies:
-    await message.reply_text(auto_replies[text])
 
-except Exception as e:
-    logger.error(f"Error in handle_messages: {e}")
+# إضافة دالة handle_messages المفقودة
+async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        message = update.message
+        text = message.text
+        
+        if not text:
+            return
+        
+        # التحقق من الكلمات الممنوعة
+        if contains_banned_word(text):
+            await message.delete()
+            await message.reply_text("⚠️ تم حذف الرسالة لاحتوائها على كلمات غير لائقة.")
+            return
+        
+        # التحقق من الروابط
+        settings = get_chat_settings(str(update.effective_chat.id))
+        if settings["delete_links"] and re.search(r'(https?://|www\.|t\.me/)', text, re.IGNORECASE):
+            # السماح للمشرفين بنشر الروابط
+            if not await is_admin(update, context):
+                await message.delete()
+                await message.reply_text("⚠️ يمنع نشر الروابط في هذه المجموعة.")
+                return
+        
+        # الردود التلقائية
+        if text in auto_replies:
+            await message.reply_text(auto_replies[text])
+            
+    except Exception as e:
+        logger.error(f"Error in handle_messages: {e}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(msg="حدث خطأ في البوت", exc_info=context.error)
@@ -794,6 +819,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_message.reply_text("⚠️ حدث خطأ غير متوقع في البوت. يرجى المحاولة لاحقاً.")
         except:
             pass
+
 # ================== ويب هوك ==================
 
 async def webhook_handler(request):
@@ -861,5 +887,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
