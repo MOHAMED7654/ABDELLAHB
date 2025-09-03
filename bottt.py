@@ -465,20 +465,25 @@ def admin_only(handler):
             return
         return await handler(update, context)
     return wrapper
-
-# دالة جديدة: حفظ جميع أعضاء المجموعة في قاعدة البيانات
 async def save_all_members(chat_id, context):
     """حفظ جميع أعضاء المجموعة في قاعدة البيانات"""
     try:
-        logger.info(f"⏳ جاري حفظ أعضاء المجموعة {chat_id} في قاعدة البيانات...")
+        logger.info(f"⏳ جاري معالجة أعضاء المجموعة {chat_id}...")
         
-        members_count = 0
+        # 1. جلب الأعضاء الموجودين أساساً في PostgreSQL
+        existing_members = get_members(str(chat_id), limit=1000)
+        members_count = len(existing_members) if existing_members else 0
         
+        logger.info(f"📊 العدد الأساسي للأعضاء المسجلين: {members_count}")
+        
+        # 2. إضافة المشرفين الجدد (إذا لم يكونوا مسجلين)
         try:
-            # 1. حفظ المشرفين أولاً
             admins = await context.bot.get_chat_administrators(chat_id)
+            new_admins_count = 0
+            
             for admin in admins:
                 try:
+                    # هذه الدالة تستخدم ON CONFLICT DO UPDATE فلا تضيف مكررات
                     add_member(
                         admin.user.id,
                         str(chat_id),
@@ -486,31 +491,22 @@ async def save_all_members(chat_id, context):
                         admin.user.first_name,
                         admin.user.last_name
                     )
-                    members_count += 1
-                    logger.info(f"تم حفظ المشرف: {admin.user.id}")
+                    new_admins_count += 1
                 except Exception as e:
                     logger.error(f"Error saving admin {admin.user.id}: {e}")
                     continue
             
-            # 2. الطريقة الوحيدة التي تعمل: الاعتماد على الأعضاء الموجودين بالفعل في DB
-            # أو انتظار أن يرسل الأعضاء رسائل ليتم تسجيلهم تلقائياً
+            logger.info(f"➕ تمت إضافة {new_admins_count} مشرف جديد")
             
-            logger.info("⚠️ لا يمكن جلب جميع الأعضاء في وضع Webhook")
-            logger.info("📝 سيتم الاعتماد على التسجيل التلقائي عند إرسال الرسائل")
-            
-            # 3. جلب الأعضاء الموجودين بالفعل في قاعدة البيانات
-            existing_members = get_members(str(chat_id), limit=1000)
-            if existing_members:
-                logger.info(f"وجد {len(existing_members)} عضو مخزون مسبقاً")
-                members_count += len(existing_members)
-                    
         except Exception as e:
-            logger.error(f"Error in member collection: {e}")
-            # حتى لو فشل، نعود True لأن بعض الأعضاء تم حفظهم
-            return members_count > 0
+            logger.error(f"Error getting admins: {e}")
         
-        logger.info(f"✅ تم حفظ {members_count} عضو في قاعدة البيانات")
-        return members_count > 0
+        # 3. الحصول على العدد النهائي بعد كل العمليات
+        final_members = get_members(str(chat_id), limit=1000)
+        final_count = len(final_members) if final_members else 0
+        
+        logger.info(f"✅ العدد النهائي للأعضاء: {final_count} عضو")
+        return final_count > 0
         
     except Exception as e:
         logger.error(f"Error in save_all_members: {e}")
@@ -951,5 +947,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
