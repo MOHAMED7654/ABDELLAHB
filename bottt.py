@@ -445,14 +445,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             user_status = await context.bot.get_chat_member(query.message.chat.id, query.from_user.id)
             if user_status.status not in ["administrator", "creator"]:
-                await query.edit_message_text("❌ هذا الزر للمشرفين فقط!")
+                # إرسال رسالة للمستخدم العادي مع الحفاظ على الرسالة الأصلية للمشرفين
+                await context.bot.send_message(
+                    chat_id=query.from_user.id,
+                    text="❌ هذا الزر للمشرفين فقط! لا يمكنك استخدامه."
+                )
                 return
         except Exception as e:
             logger.error(f"Error checking admin status in callback: {e}")
             await query.edit_message_text("❌ حدث خطأ أثناء التحقق من الصلاحيات!")
             return
         
-        # معالجة طلبات الطرد
+        # معالجة طلبات الطرد (فقط للمشرفين)
         parts = query.data.split("_")
         action = parts[1]
         user_id = int(parts[2])
@@ -644,6 +648,7 @@ async def delete_links_setting(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Error in delete_links_setting: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء تعديل الإعداد.")
 
+@admin_only
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🏓 البوت يعمل بشكل طبيعي! ✅")
 
