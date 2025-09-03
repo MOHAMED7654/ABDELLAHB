@@ -60,6 +60,22 @@ def test_connection():
         logger.error(f"❌ Database connection test failed: {e}")
         return False
 
+# إسقاط الجداول الحالية
+def drop_existing_tables():
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                # إسقاط الجداول بالترتيب الصحيح بسبب العلاقات
+                cursor.execute('DROP TABLE IF EXISTS kick_requests CASCADE')
+                cursor.execute('DROP TABLE IF EXISTS warnings CASCADE')
+                cursor.execute('DROP TABLE IF EXISTS members CASCADE')
+                cursor.execute('DROP TABLE IF EXISTS settings CASCADE')
+                logger.info("✅ Existing tables dropped successfully")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error dropping tables: {e}")
+        return False
+
 # التحقق من هيكل الجداول
 def check_database_schema():
     try:
@@ -89,27 +105,6 @@ def check_database_schema():
                     
     except Exception as e:
         logger.error(f"Error checking schema: {e}")
-
-# إصلاح هيكل الجدول إذا كان ناقصاً
-def fix_database_schema():
-    try:
-        with get_connection() as conn:
-            with conn.cursor() as cursor:
-                # إضافة العمود إذا لم يكن موجوداً
-                cursor.execute('''
-                DO $$ 
-                BEGIN 
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns 
-                        WHERE table_name='members' AND column_name='last_seen'
-                    ) THEN
-                        ALTER TABLE members ADD COLUMN last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-                    END IF;
-                END $$;
-                ''')
-                logger.info("✅ Database schema checked and fixed if needed")
-    except Exception as e:
-        logger.error(f"❌ Error fixing database schema: {e}")
 
 # وظائف الاتصال بقاعدة البيانات
 def init_database():
@@ -168,16 +163,14 @@ def init_database():
                 ''')
         
         logger.info("✅ Database initialized successfully")
-        fix_database_schema()  # إصلاح الهيكل بعد التهيئة
+        return True
     except Exception as e:
         logger.error(f"❌ Error initializing database: {e}")
+        return False
 
-# إضافة عضو إلى قاعدة البيانات - استخدام النص مؤقتاً
+# إضافة عضو إلى قاعدة البيانات
 def add_member(user_id, chat_id, username, first_name, last_name):
     try:
-        # تحويل user_id إلى نص مؤقتاً للتغلب على المشكلة
-        user_id_str = str(user_id)
-        
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
@@ -188,7 +181,7 @@ def add_member(user_id, chat_id, username, first_name, last_name):
                 first_name = EXCLUDED.first_name,
                 last_name = EXCLUDED.last_name,
                 last_seen = CURRENT_TIMESTAMP
-                ''', (user_id_str, chat_id, username, first_name, last_name))
+                ''', (user_id, chat_id, username, first_name, last_name))
         
         logger.debug(f"Member {user_id} added/updated in chat {chat_id}")
         return True
@@ -217,18 +210,15 @@ def get_members(chat_id):
         logger.error(f"Error getting members for chat {chat_id}: {e}")
         return []
 
-# إضافة تحذير - استخدام النص مؤقتاً
+# إضافة تحذير
 def add_warning(user_id, chat_id, reason, admin_id=None):
     try:
-        user_id_str = str(user_id)  # تحويل إلى نص
-        admin_id_str = str(admin_id) if admin_id else None
-        
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
                 INSERT INTO warnings (user_id, chat_id, reason, admin_id)
                 VALUES (%s, %s, %s, %s)
-                ''', (user_id_str, chat_id, reason, admin_id_str))
+                ''', (user_id, chat_id, reason, admin_id))
         
         logger.info(f"Warning added for user {user_id} in chat {chat_id}")
         return True
@@ -236,16 +226,15 @@ def add_warning(user_id, chat_id, reason, admin_id=None):
         logger.error(f"Error adding warning for user {user_id}: {e}")
         return False
 
-# الحصول على عدد التحذيرات - استخدام النص مؤقتاً
+# الحصول على عدد التحذيرات
 def get_warning_count(user_id, chat_id):
     try:
-        user_id_str = str(user_id)
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
                 SELECT COUNT(*) FROM warnings 
                 WHERE user_id = %s AND chat_id = %s
-                ''', (user_id_str, chat_id))
+                ''', (user_id, chat_id))
                 count = cursor.fetchone()[0]
         
         return count
@@ -253,10 +242,9 @@ def get_warning_count(user_id, chat_id):
         logger.error(f"Error getting warning count for user {user_id}: {e}")
         return 0
 
-# الحصول على أسباب التحذيرات - استخدام النص مؤقتاً
+# الحصول على أسباب التحذيرات
 def get_warning_reasons(user_id, chat_id):
     try:
-        user_id_str = str(user_id)
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
@@ -264,7 +252,7 @@ def get_warning_reasons(user_id, chat_id):
                 FROM warnings 
                 WHERE user_id = %s AND chat_id = %s
                 ORDER BY warning_date DESC
-                ''', (user_id_str, chat_id))
+                ''', (user_id, chat_id))
                 reasons = cursor.fetchall()
         
         return reasons
@@ -272,16 +260,15 @@ def get_warning_reasons(user_id, chat_id):
         logger.error(f"Error getting warning reasons for user {user_id}: {e}")
         return []
 
-# إزالة جميع تحذيرات العضو - استخدام النص مؤقتاً
+# إزالة جميع تحذيرات العضو
 def reset_warnings(user_id, chat_id):
     try:
-        user_id_str = str(user_id)
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
                 DELETE FROM warnings 
                 WHERE user_id = %s AND chat_id = %s
-                ''', (user_id_str, chat_id))
+                ''', (user_id, chat_id))
                 affected = cursor.rowcount
         
         logger.info(f"Warnings reset for user {user_id} in chat {chat_id}")
@@ -329,7 +316,6 @@ def get_chat_settings(chat_id):
                 "youtube_channel": settings[2]
             }
         else:
-            # إعدادات افتراضية مع زيادة الحد الأقصى للتحذيرات
             return {
                 "max_warns": 40,
                 "delete_links": True,
@@ -348,12 +334,10 @@ def save_chat_settings(chat_id, max_warns=None, delete_links=None, youtube_chann
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                # التحقق من وجود الإعدادات
                 cursor.execute('SELECT chat_id FROM settings WHERE chat_id = %s', (chat_id,))
                 exists = cursor.fetchone()
                 
                 if exists:
-                    # تحديث الإعدادات الحالية
                     update_fields = []
                     params = []
                     
@@ -377,7 +361,6 @@ def save_chat_settings(chat_id, max_warns=None, delete_links=None, youtube_chann
                         WHERE chat_id = %s
                         ''', params)
                 else:
-                    # إدخال إعدادات جديدة
                     cursor.execute('''
                     INSERT INTO settings (chat_id, max_warns, delete_links, youtube_channel)
                     VALUES (%s, %s, %s, %s)
@@ -389,18 +372,15 @@ def save_chat_settings(chat_id, max_warns=None, delete_links=None, youtube_chann
         logger.error(f"Error saving settings for chat {chat_id}: {e}")
         return False
 
-# إضافة طلب طرد - استخدام النص مؤقتاً
+# إضافة طلب طرد
 def add_kick_request(user_id, chat_id, admin_id):
     try:
-        user_id_str = str(user_id)
-        admin_id_str = str(admin_id)
-        
         with get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
                 INSERT INTO kick_requests (user_id, chat_id, admin_id)
                 VALUES (%s, %s, %s)
-                ''', (user_id_str, chat_id, admin_id_str))
+                ''', (user_id, chat_id, admin_id))
         
         return True
     except Exception as e:
@@ -408,13 +388,19 @@ def add_kick_request(user_id, chat_id, admin_id):
         return False
 
 # تهيئة قاعدة البيانات عند التشغيل
-test_connection()
-init_database()
-check_database_schema()  # التحقق من هيكل الجداول
+if test_connection():
+    if drop_existing_tables():
+        if init_database():
+            check_database_schema()
+            logger.info("✅ Database setup completed successfully!")
+        else:
+            logger.error("❌ Failed to initialize database")
+    else:
+        logger.error("❌ Failed to drop existing tables")
+else:
+    logger.error("❌ Database connection failed")
 
-# ... (بقية الكود يبقى كما هو بدون تغيير) ...
-
-# الكلمات الممنوعة - تم تحسينها لتجنب الحذف الخاطئ
+# الكلمات الممنوعة
 banned_words = {
     " كلب ", " حمار ", " قحب ", " زبي ", " خرا ", " بول ",
     "ولد الحرام", "ولد القحبة", "يا قحبة", " نيك ", " منيك ",
@@ -439,19 +425,6 @@ WELCOME_MESSAGES = {
 4-  الامتثال لقرارات المشرفين ضروري للحفاظ على النظام
 ملاحظة: في حالات الضرورة يمكن التواصل مع المشرفين ( الاناث مع مالكة المجموعة و الذكور مع المشرفين الذكور)
 🫧 𝓣𝓸𝓾𝓴𝓪 ꨄ︎
-""",
-    "en": """
-Welcome to our refined Computer Science community.
-You must adhere to the following set of rules:
-1. Do not share links without permission
-2. Avoid discussing off-topic subjects unless related to studies, and always speak politely
-3. Refrain from suspicious private messaging
-(You can ask any questions in the group, so this excuse is not acceptable)
-Please note: we are only responsible for what happens within the group
-4. Compliance with the supervisors' decisions is essential to maintain order
-Note: In necessary cases, you may contact the supervisors
-(Females should reach out to the group owner, and males to the male admins)
-🫧 𝓣𝓸𝓾𝓴𝓪 ꨄ︎
 """
 }
 
@@ -460,7 +433,7 @@ application = Application.builder().token(TOKEN).build()
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
-        return False  # جعل الأوامر تعمل فقط في المجموعات للمشرفين
+        return False
         
     try:
         member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
@@ -469,18 +442,10 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error checking admin status: {e}")
         return False
 
-async def check_subscription(user_id):
-    # هنا يمكن إضافة التحقق من الاشتراك في القناة
-    return True
-
 async def warn_user(chat_id, user_id, reason=None, admin_id=None):
     try:
-        # إضافة التحذير إلى قاعدة البيانات
         add_warning(user_id, str(chat_id), reason, admin_id)
-        
-        # الحصول على عدد التحذيرات
         warn_count = get_warning_count(user_id, str(chat_id))
-        
         return warn_count
     except Exception as e:
         logger.error(f"Error in warn_user: {e}")
@@ -490,7 +455,6 @@ async def get_warns(chat_id, user_id):
     try:
         count = get_warning_count(user_id, str(chat_id))
         reasons = get_warning_reasons(user_id, str(chat_id))
-        
         return {
             "count": count,
             "reasons": [reason[0] for reason in reasons]
@@ -566,17 +530,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    if query.data == "check_sub":
-        if await check_subscription(query.from_user.id):
-            await query.edit_message_text("✅ شكراً للاشتراك! يمكنك الآن استخدام البوت.")
-        else:
-            await query.edit_message_text("❌ لم يتم العثور على اشتراكك. يرجى الاشتراك أولاً.")
-    elif query.data.startswith("kick_"):
-        # التحقق من أن المستخدم مشرف
+    if query.data.startswith("kick_"):
         try:
             user_status = await context.bot.get_chat_member(query.message.chat.id, query.from_user.id)
             if user_status.status not in ["administrator", "creator"]:
-                # إرسال رسالة للمستخدم العادي مع الحفاظ على الرسالة الأصلية للمشرفين
                 await context.bot.send_message(
                     chat_id=query.from_user.id,
                     text="❌ هذا الزر للمشرفين فقط! لا يمكنك استخدامه."
@@ -587,7 +544,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ حدث خطأ أثناء التحقق من الصلاحيات!")
             return
         
-        # معالجة طلبات الطرد (فقط للمشرفين)
         parts = query.data.split("_")
         action = parts[1]
         user_id = int(parts[2])
@@ -633,10 +589,8 @@ async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name = username or f"{first_name} {last_name}".strip() or f"user_{user_id}"
             mentions.append(f"[{name}](tg://user?id={user_id})")
         
-        max_per_msg = 5
-        
-        for i in range(0, len(mentions), max_per_msg):
-            batch = mentions[i:i+max_per_msg]
+        for i in range(0, len(mentions), 5):
+            batch = mentions[i:i+5]
             message = "📢 منشن لجميع الأعضاء:\n\n" + "\n".join(batch)
             await update.message.reply_text(message, parse_mode="Markdown")
         
@@ -661,7 +615,6 @@ async def warn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         max_warns = settings["max_warns"]
 
         if warns >= max_warns:
-            # إرسال طلب تأكيد الطرد للمشرفين
             keyboard = [
                 [
                     InlineKeyboardButton("✅ نعم، طرده", callback_data=f"kick_approve_{user_id}_{update.effective_chat.id}"),
@@ -798,10 +751,8 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if member.id == context.bot.id:
                 continue
             
-            # إرسال رسالة الترحيب العربية
             await update.message.reply_text(WELCOME_MESSAGES["ar"], parse_mode="Markdown")
             
-            # تسجيل المستخدم في قاعدة البيانات
             add_member(
                 member.id, 
                 str(update.effective_chat.id),
@@ -821,17 +772,15 @@ def contains_banned_word(text):
             return True
     return False
 
-# إضافة دالة handle_messages المفقودة
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         message = update.message
         text = message.text
-        user = message.from_user  # إضافة هذا السطر
+        user = message.from_user
         
         if not text:
             return
         
-        # تسجيل المستخدم في قاعدة البيانات عند إرسال رسالة - أضف هذه الأسطر
         add_member(
             user.id,
             str(update.effective_chat.id),
@@ -840,22 +789,18 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user.last_name
         )
         
-        # التحقق من الكلمات الممنوعة
         if contains_banned_word(text):
             await message.delete()
             await message.reply_text("⚠️ تم حذف الرسالة لاحتوائها على كلمات غير لائقة.")
             return
         
-        # التحقق من الروابط
         settings = get_chat_settings(str(update.effective_chat.id))
         if settings["delete_links"] and re.search(r'(https?://|www\.|t\.me/)', text, re.IGNORECASE):
-            # السماح للمشرفين بنشر الروابط
             if not await is_admin(update, context):
                 await message.delete()
                 await message.reply_text("⚠️ يمنع نشر الروابط في هذه المجموعة.")
                 return
         
-        # الردود التلقائية
         if text in auto_replies:
             await message.reply_text(auto_replies[text])
             
@@ -909,7 +854,6 @@ async def on_shutdown(app):
     logger.info("Bot stopped successfully!")
 
 def main():
-    # إضافة جميع handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("admins", admins))
@@ -926,15 +870,12 @@ def main():
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
     application.add_error_handler(error_handler)
 
-    # إعداد ويب هوك
     web_app = web.Application()
     web_app.router.add_post('/webhook', webhook_handler)
     web_app.on_startup.append(on_startup)
     web_app.on_shutdown.append(on_shutdown)
 
-    # تشغيل الخادم
     web.run_app(web_app, host='0.0.0.0', port=PORT)
 
 if __name__ == "__main__":
     main()
-
