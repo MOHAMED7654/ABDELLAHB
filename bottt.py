@@ -470,39 +470,32 @@ def admin_only(handler):
 async def get_all_chat_members(chat_id, context):
     """جلب جميع أعضاء المجموعة باستخدام Telegram API"""
     try:
-        members_count = await context.bot.get_chat_members_count(chat_id)
+        # استخدام get_chat_member_count بدلاً من get_chat_members_count
+        members_count = await context.bot.get_chat_member_count(chat_id)
         logger.info(f"📊 العدد الإجمالي لأعضاء المجموعة: {members_count}")
         
         all_members = []
-        offset = 0
-        limit = 200  # الحد الأقصى المسموح به من قبل Telegram API
         
-        while offset < members_count:
-            try:
-                # جلب مجموعة من الأعضاء
-                members_chunk = await context.bot.get_chat_members(chat_id, offset=offset, limit=limit)
-                
-                for member in members_chunk:
-                    user = member.user
-                    if not user.is_bot:  # تجاهل البوتات
-                        all_members.append({
-                            'user_id': user.id,
-                            'username': user.username,
-                            'first_name': user.first_name,
-                            'last_name': user.last_name
-                        })
-                
-                offset += limit
-                logger.info(f"✅ تم جلب {len(members_chunk)} عضو، الإجمالي حتى الآن: {len(all_members)}")
-                
-                # تأخير لتجنب حظر Telegram API
-                await asyncio.sleep(1)
-                
-            except Exception as e:
-                logger.error(f"❌ خطأ في جلب مجموعة الأعضاء: {e}")
-                break
+        # جلب المشرفين أولاً (يمكننا جلبهم مباشرة)
+        try:
+            admins = await context.bot.get_chat_administrators(chat_id)
+            for admin in admins:
+                user = admin.user
+                if not user.is_bot:  # تجاهل البوتات
+                    all_members.append({
+                        'user_id': user.id,
+                        'username': user.username,
+                        'first_name': user.first_name,
+                        'last_name': user.last_name
+                    })
+            logger.info(f"✅ تم جلب {len(admins)} مشرف")
+        except Exception as e:
+            logger.error(f"❌ خطأ في جلب المشرفين: {e}")
         
-        logger.info(f"✅ تم جلب جميع الأعضاء بنجاح، العدد الإجمالي: {len(all_members)}")
+        # للأسف، لا توجد طريقة مباشرة لجلب جميع الأعضاء في الإصدارات الحديثة
+        # لذلك سنعتمد على حفظ الأعضاء عند تفاعلهم فقط
+        
+        logger.info(f"✅ تم جلب {len(all_members)} عضو (المشرفين فقط)")
         return all_members
         
     except Exception as e:
@@ -514,14 +507,14 @@ async def save_all_members(chat_id, context):
     try:
         logger.info(f"⏳ جاري معالجة أعضاء المجموعة {chat_id}...")
         
-        # 1. جلب جميع أعضاء المجموعة باستخدام Telegram API
+        # 1. جلب المشرفين فقط (لا يمكن جلب جميع الأعضاء مباشرة)
         all_members = await get_all_chat_members(chat_id, context)
         
         if not all_members:
             logger.error("❌ لم يتم جلب أي أعضاء من المجموعة")
             return False
         
-        # 2. حفظ جميع الأعضاء في قاعدة البيانات
+        # 2. حفظ المشرفين في قاعدة البيانات
         saved_count = 0
         for member in all_members:
             try:
@@ -538,6 +531,16 @@ async def save_all_members(chat_id, context):
                 continue
         
         logger.info(f"✅ تم حفظ {saved_count} عضو في قاعدة البيانات")
+        
+        # 3. إضافة رسالة توجيهية للأعضاء للتفاعل ليتم حفظهم
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="🔔 للمحافظة على قائمة الأعضاء محدثة، يرجى التفاعل في المجموعة بإرسال أي رسالة.\nسيتم حفظ جميع الأعضاء الذين يتفاعلون تلقائيًا في قاعدة البيانات."
+            )
+        except Exception as e:
+            logger.error(f"❌ خطأ في إرسال الرسالة: {e}")
+        
         return saved_count > 0
         
     except Exception as e:
@@ -603,7 +606,7 @@ async def sync_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if await save_all_members(update.effective_chat.id, context):
             members = get_members(str(update.effective_chat.id))
-            await update.message.reply_text(f"✅ تم مزامنة {len(members)} عضو في قاعدة البيانات.\n\n💾 البيانات محفوظة بشكل دائم ولن تضيع عند إعادة التشغيل!")
+            await update.message.reply_text(f"✅ تم مزامنة {len(members)} عضو في قاعدة البيانات.\n\n💾 سيتم حفظ الأعضاء الجدد عند تفاعلهم في المجموعة.")
         else:
             await update.message.reply_text("❌ فشل في مزامنة الأعضاء.")
             
@@ -671,7 +674,7 @@ async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         members = get_members(chat_id, limit=2000)
 
         if not members:
-            await update.message.reply_text("📭 لا يوجد أعضاء مخزنون في هذه المجموعة.\nاستخدم /sync أولاً لمزامنة الأعضاء.")
+            await update.message.reply_text("📭 لا يوجد أعضاء مخزنون في هذه المجموعة.\nسيتم حفظ الأعضاء عند تفاعلهم في المجموعة.")
             return
 
         mentions = []
@@ -936,7 +939,7 @@ async def webhook_handler(request):
 async def set_webhook():
     try:
         await application.bot.set_webhook(
-            url=WEBHOOK_URL,
+            url=WEBHOOCK_URL,
             secret_token=SECRET_TOKEN,
             drop_pending_updates=True
         )
@@ -983,5 +986,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
