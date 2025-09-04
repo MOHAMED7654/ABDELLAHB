@@ -17,11 +17,6 @@ from telegram.ext import (
     CallbackQueryHandler
 )
 
-# حل مؤقت لمشكلة imghdr في Python 3.13
-import sys
-if sys.version_info >= (3, 13):
-    import imghdr
-
 # إعدادات اللوغ
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -40,8 +35,8 @@ HEARTBEAT_INTERVAL = 10 * 60  # كل 10 دقائق (600 ثانية)
 DATABASE_URL = "postgresql://mybotuser:prb09Wv3eU2OhkoeOXyR5n05IBBMEvhn@dpg-d2s5g4m3jp1c738svjfg-a.frankfurt-postgres.render.com/mybotdb_mqjm"
 
 # إعدادات إضافية
-ADMIN_ID = 7635779264  # الأيدي الخاص بك للإشعارات
-KEEP_ALIVE_URL = "https://abdellahb-2.onrender.com/webhook"  # رابط الويب هوك
+ADMIN_IDS = [7635779264, 7453316860]  # الأيدي الخاص بك وللمشرفة الثانية
+KEEP_ALIVE_URL = "https://abdellahb-2.onrender.com"  # رابط التطبيق الرئيسي
 
 # اتصال مباشر بدون pool
 @contextmanager
@@ -115,8 +110,12 @@ def fix_database_schema():
                     ''')
                     logger.info("✅ تم إضافة حقل warnings_enabled إلى جدول settings")
                 
+                logger.info("✅ تم إصلاح جدول settings بنجاح")
+        
+        return True
     except Exception as e:
         logger.error(f"❌ Error fixing database schema: {e}")
+        return False
 
 # وظائف الاتصال بقاعدة البيانات
 def init_database():
@@ -311,7 +310,7 @@ def get_chat_settings(chat_id):
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                # محاولة جلب جميع الحقول مع التعامل مع الأخطاء
+                # استعلام آمن يتجنب الأخطاء
                 try:
                     cursor.execute('''
                     SELECT max_warns, delete_links, youtube_channel, warnings_enabled 
@@ -319,24 +318,24 @@ def get_chat_settings(chat_id):
                     WHERE chat_id = %s
                     ''', (chat_id,))
                     settings = cursor.fetchone()
-                    
-                    if settings:
-                        return {
-                            "max_warns": settings[0],
-                            "delete_links": bool(settings[1]),
-                            "youtube_channel": settings[2],
-                            "warnings_enabled": bool(settings[3]) if settings[3] is not None else True
-                        }
-                except psycopg.Error:
-                    # إذا فشل، جلب الحقول الأساسية فقط
+                except:
+                    # إذا فشل الاستخدام، استخدم الاستعلام الأساسي
                     cursor.execute('''
                     SELECT max_warns, delete_links, youtube_channel 
                     FROM settings 
                     WHERE chat_id = %s
                     ''', (chat_id,))
                     settings = cursor.fetchone()
-                    
-                    if settings:
+                
+                if settings:
+                    if len(settings) == 4:  # إذا كان يحتوي على warnings_enabled
+                        return {
+                            "max_warns": settings[0],
+                            "delete_links": bool(settings[1]),
+                            "youtube_channel": settings[2],
+                            "warnings_enabled": bool(settings[3]) if settings[3] is not None else True
+                        }
+                    else:  # إذا كان يحتوي على الحقول الأساسية فقط
                         return {
                             "max_warns": settings[0],
                             "delete_links": bool(settings[1]),
@@ -458,6 +457,17 @@ WELCOME_MESSAGES = {
 4-  الامتثال لقرارات المشرفين ضروري للحفاظ على النظام
 ملاحظة: في حالات الضرورة يمكن التواصل مع المشرفين ( الاناث مع مالكة المجموعة و الذكور مع المشرفين الذكور)
 🫧 𝓣𝓸𝓾𝓴𝓪 ꨄ︎
+""",
+    "en": """
+Welcome to our elite informatics community!  
+Please adhere to the following rules:  
+1- No sharing links without permission  
+2- Avoid off-topic discussions except for studies, and maintain polite conversation  
+3- Refrain from suspicious private communication (you can ask any questions in the group)  
+We are only responsible for what happens within the group  
+4- Compliance with administrators' decisions is necessary to maintain order  
+Note: In case of necessity, you can contact the admins (females with the group owner, males with male admins)  
+🫧 𝓣𝓸𝓾𝓴𝓪 ꨄ︎
 """
 }
 
@@ -475,7 +485,7 @@ async def heartbeat_task():
                     if response.status == 200:
                         logger.info("✅ تم إرسال نبضة حياة بنجاح")
                     else:
-                        logger.warning(f"⚠️ نبضة الحياة عادت برمز: {response.status}")
+                        logger.info(f"⚠️ نبضة الحياة عادت برمز: {response.status}")
             except Exception as e:
                 logger.error(f"❌ خطأ في نبضة الحياة: {e}")
             
@@ -483,16 +493,17 @@ async def heartbeat_task():
 
 # إرسال إشعارات للإدمن
 async def send_admin_notification(context, message):
-    """إرسال إشعار للمشرف عند حدوث أحداث مهمة"""
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=message,
-            parse_mode="HTML"
-        )
-        logger.info(f"✅ تم إرسال إشعار للإدمن: {message}")
-    except Exception as e:
-        logger.error(f"❌ فشل في إرسال إشعار للإدمن: {e}")
+    """إرسال إشعار للمشرفين عند حدوث أحداث مهمة"""
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info(f"✅ تم إرسال إشعار للإدمن {admin_id}")
+        except Exception as e:
+            logger.error(f"❌ فشل في إرسال إشعار للإدمن {admin_id}: {e}")
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
@@ -963,6 +974,7 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if member.id == context.bot.id:
                 continue
             
+            # إرسال رسالة ترحيب بالعربية
             await update.message.reply_text(WELCOME_MESSAGES["ar"], parse_mode="Markdown")
             
             # حفظ العضو في قاعدة البيانات عند الانضمام
@@ -996,6 +1008,9 @@ def contains_banned_word(text):
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         message = update.message
+        if not message or not message.text:
+            return
+            
         text = message.text
         user = message.from_user
         
@@ -1022,17 +1037,21 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # إضافة تحذير للعضو
                     warn_count = await warn_user(update.effective_chat.id, user.id, "كلمات غير لائقة", context.bot.id)
                     
-                    # إرسال رسالة توضيحية للمجموعة
-                    warning_msg = f"⚠️ تم حذف رسالة {user.first_name} لاحتوائها على كلمات غير لائقة.\nعدد تحذيراته: {warn_count}/{settings['max_warns']}"
+                    # إرسال رسالة توضيحية للمجموعة مع منشن للعضو
+                    warning_msg = f"🚫 تم حذف رسالة العضو [{user.first_name}](tg://user?id={user.id}) لاحتوائها على كلمات غير لائقة.\n\n" \
+                                 f"📊 عدد تحذيراته: {warn_count}/{settings['max_warns']}\n" \
+                                 f"⚖️ سيتم طرده تلقائياً عند الوصول إلى {settings['max_warns']} تحذيرات"
+                    
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
-                        text=warning_msg
+                        text=warning_msg,
+                        parse_mode="Markdown"
                     )
                     
                     # إرسال إشعار خاص للإدمن
                     admin_msg = f"🚨 <b>تم حذف رسالة مسيئة</b>\n\n" \
-                               f"👤 العضو: {user.first_name} (ID: {user.id})\n" \
-                               f"💬 الرسالة: {text[:100]}...\n" \
+                               f"👤 العضو: [{user.first_name}](tg://user?id={user.id}) (ID: `{user.id}`)\n" \
+                               f"💬 الرسالة: `{text[:100]}{'...' if len(text) > 100 else ''}`\n" \
                                f"📊 عدد التحذيرات: {warn_count}/{settings['max_warns']}\n" \
                                f"👥 المجموعة: {update.effective_chat.title}"
                     await send_admin_notification(context, admin_msg)
@@ -1049,17 +1068,21 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # إضافة تحذير للعضو
                     warn_count = await warn_user(update.effective_chat.id, user.id, "نشر روابط", context.bot.id)
                     
-                    # إرسال رسالة توضيحية للمجموعة
-                    warning_msg = f"⚠️ تم حذف رسالة {user.first_name} لاحتوائها على روابط.\nعدد تحذيراته: {warn_count}/{settings['max_warns']}"
+                    # إرسال رسالة توضيحية للمجموعة مع منشن للعضو
+                    warning_msg = f"🔗 تم حذف رسالة العضو [{user.first_name}](tg://user?id={user.id}) لاحتوائها على روابط.\n\n" \
+                                 f"📊 عدد تحذيراته: {warn_count}/{settings['max_warns']}\n" \
+                                 f"⚖️ سيتم طرده تلقائياً عند الوصول إلى {settings['max_warns']} تحذيرات"
+                    
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
-                        text=warning_msg
+                        text=warning_msg,
+                        parse_mode="Markdown"
                     )
                     
                     # إرسال إشعار خاص للإدمن
                     admin_msg = f"🔗 <b>تم حذف رسالة تحتوي على روابط</b>\n\n" \
-                               f"👤 العضو: {user.first_name} (ID: {user.id})\n" \
-                               f"💬 الرسالة: {text[:100]}...\n" \
+                               f"👤 العضو: [{user.first_name}](tg://user?id={user.id}) (ID: `{user.id}`)\n" \
+                               f"💬 الرسالة: `{text[:100]}{'...' if len(text) > 100 else ''}`\n" \
                                f"📊 عدد التحذيرات: {warn_count}/{settings['max_warns']}\n" \
                                f"👥 المجموعة: {update.effective_chat.title}"
                     await send_admin_notification(context, admin_msg)
