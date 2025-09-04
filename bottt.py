@@ -1,5 +1,4 @@
 import logging
-import json
 import re
 import os
 import asyncio
@@ -17,6 +16,11 @@ from telegram.ext import (
     filters,
     CallbackQueryHandler
 )
+
+# حل مؤقت لمشكلة imghdr في Python 3.13
+import sys
+if sys.version_info >= (3, 13):
+    import imghdr
 
 # إعدادات اللوغ
 logging.basicConfig(
@@ -36,8 +40,8 @@ HEARTBEAT_INTERVAL = 10 * 60  # كل 10 دقائق (600 ثانية)
 DATABASE_URL = "postgresql://mybotuser:prb09Wv3eU2OhkoeOXyR5n05IBBMEvhn@dpg-d2s5g4m3jp1c738svjfg-a.frankfurt-postgres.render.com/mybotdb_mqjm"
 
 # إعدادات إضافية
-ADMIN_ID = 7635779264  # ضع هنا الأيدي الخاص بك للإشعارات
-KEEP_ALIVE_URL = "https://abdellahb-2.onrender.com"  # رابط تطبيقك
+ADMIN_ID = 7635779264  # الأيدي الخاص بك للإشعارات
+KEEP_ALIVE_URL = "https://abdellahb-2.onrender.com/webhook"  # رابط الويب هوك
 
 # اتصال مباشر بدون pool
 @contextmanager
@@ -88,6 +92,31 @@ def check_database_schema():
                     
     except Exception as e:
         logger.error(f"Error checking schema: {e}")
+
+# إصلاح الجدول وإضافة الحقول المفقودة
+def fix_database_schema():
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                # التحقق إذا كان الحقل warnings_enabled موجوداً
+                cursor.execute('''
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'settings' 
+                AND column_name = 'warnings_enabled'
+                ''')
+                exists = cursor.fetchone()
+                
+                if not exists:
+                    # إضافة الحقل المفقود
+                    cursor.execute('''
+                    ALTER TABLE settings 
+                    ADD COLUMN warnings_enabled BOOLEAN DEFAULT TRUE
+                    ''')
+                    logger.info("✅ تم إضافة حقل warnings_enabled إلى جدول settings")
+                
+    except Exception as e:
+        logger.error(f"❌ Error fixing database schema: {e}")
 
 # وظائف الاتصال بقاعدة البيانات
 def init_database():
@@ -282,27 +311,46 @@ def get_chat_settings(chat_id):
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute('''
-                SELECT max_warns, delete_links, youtube_channel, warnings_enabled 
-                FROM settings 
-                WHERE chat_id = %s
-                ''', (chat_id,))
-                settings = cursor.fetchone()
+                # محاولة جلب جميع الحقول مع التعامل مع الأخطاء
+                try:
+                    cursor.execute('''
+                    SELECT max_warns, delete_links, youtube_channel, warnings_enabled 
+                    FROM settings 
+                    WHERE chat_id = %s
+                    ''', (chat_id,))
+                    settings = cursor.fetchone()
+                    
+                    if settings:
+                        return {
+                            "max_warns": settings[0],
+                            "delete_links": bool(settings[1]),
+                            "youtube_channel": settings[2],
+                            "warnings_enabled": bool(settings[3]) if settings[3] is not None else True
+                        }
+                except psycopg.Error:
+                    # إذا فشل، جلب الحقول الأساسية فقط
+                    cursor.execute('''
+                    SELECT max_warns, delete_links, youtube_channel 
+                    FROM settings 
+                    WHERE chat_id = %s
+                    ''', (chat_id,))
+                    settings = cursor.fetchone()
+                    
+                    if settings:
+                        return {
+                            "max_warns": settings[0],
+                            "delete_links": bool(settings[1]),
+                            "youtube_channel": settings[2],
+                            "warnings_enabled": True
+                        }
         
-        if settings:
-            return {
-                "max_warns": settings[0],
-                "delete_links": bool(settings[1]),
-                "youtube_channel": settings[2],
-                "warnings_enabled": bool(settings[3]) if settings[3] is not None else True
-            }
-        else:
-            return {
-                "max_warns": 40,
-                "delete_links": True,
-                "youtube_channel": "@Mik_emm",
-                "warnings_enabled": True
-            }
+        # الإعدادات الافتراضية إذا لم توجد إعدادات للمجموعة
+        return {
+            "max_warns": 40,
+            "delete_links": True,
+            "youtube_channel": "@Mik_emm",
+            "warnings_enabled": True
+        }
     except Exception as e:
         logger.error(f"Error getting settings for chat {chat_id}: {e}")
         return {
@@ -377,6 +425,7 @@ def add_kick_request(user_id, chat_id, admin_id):
 # تهيئة قاعدة البيانات عند التشغيل
 if test_connection():
     if init_database():
+        fix_database_schema()  # إصلاح الجدول
         check_database_schema()
         logger.info("✅ Database setup completed successfully!")
     else:
@@ -384,7 +433,7 @@ if test_connection():
 else:
     logger.error("❌ Database connection failed")
 
-# الكلمات الممنوعة (مع تحسين المطابقة)
+# الكلمات الممنوعة (مع تحسين المطابقة باستخدام regex)
 banned_words = {
     r'\bكلب\b', r'\bحمار\b', r'\bقحب\b', r'\bزبي\b', r'\bخرا\b', r'\bبول\b',
     r'\bولد الحرام\b', r'\bولد القحبة\b', r'\bيا قحبة\b', r'\bنيك\b', r'\bمنيك\b',
@@ -431,6 +480,19 @@ async def heartbeat_task():
                 logger.error(f"❌ خطأ في نبضة الحياة: {e}")
             
             await asyncio.sleep(HEARTBEAT_INTERVAL)
+
+# إرسال إشعارات للإدمن
+async def send_admin_notification(context, message):
+    """إرسال إشعار للمشرف عند حدوث أحداث مهمة"""
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=message,
+            parse_mode="HTML"
+        )
+        logger.info(f"✅ تم إرسال إشعار للإدمن: {message}")
+    except Exception as e:
+        logger.error(f"❌ فشل في إرسال إشعار للإدمن: {e}")
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
@@ -647,6 +709,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.ban_chat_member(chat_id, user_id)
                 await query.edit_message_text(f"✅ تم طرد العضو بنجاح.")
+                
+                # إرسال إشعار للإدمن
+                admin_msg = f"🚨 <b>تم طرد عضو</b>\n\n" \
+                           f"👤 العضو: {user_id}\n" \
+                           f"👥 المجموعة: {chat_id}\n" \
+                           f"🛠️ تم الطرد بواسطة: {query.from_user.first_name}"
+                await send_admin_notification(context, admin_msg)
+                
             except Exception as e:
                 await query.edit_message_text(f"❌ لم أتمكن من طرد العضو: {e}")
         elif action == "reject":
@@ -741,6 +811,15 @@ async def warn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"⚠️ تم تحذير {user_name} ({warns}/{max_warns})\n"
                 f"السبب: {reason}"
             )
+            
+        # إرسال إشعار للإدمن
+        admin_msg = f"⚠️ <b>تم تحذير عضو</b>\n\n" \
+                   f"👤 العضو: {user_name} (ID: {user_id})\n" \
+                   f"📊 عدد التحذيرات: {warns}/{max_warns}\n" \
+                   f"📝 السبب: {reason}\n" \
+                   f"👥 المجموعة: {update.effective_chat.title}"
+        await send_admin_notification(context, admin_msg)
+            
     except Exception as e:
         logger.error(f"Error in warn command: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء تنفيذ الأمر.")
@@ -757,6 +836,13 @@ async def unwarn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if await reset_warns(update.effective_chat.id, user_id):
             await update.message.reply_text(f"✅ تم إزالة جميع التحذيرات لـ {user_name}")
+            
+            # إرسال إشعار للإدمن
+            admin_msg = f"✅ <b>تم إزالة تحذيرات عضو</b>\n\n" \
+                       f"👤 العضو: {user_name} (ID: {user_id})\n" \
+                       f"👥 المجموعة: {update.effective_chat.title}"
+            await send_admin_notification(context, admin_msg)
+            
         else:
             await update.message.reply_text(f"ℹ️ لا يوجد تحذيرات لـ {user_name}")
     except Exception as e:
@@ -887,6 +973,13 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 member.first_name,
                 member.last_name
             )
+            
+            # إرسال إشعار للإدمن
+            admin_msg = f"👋 <b>عضو جديد انضم للمجموعة</b>\n\n" \
+                       f"👤 العضو: {member.first_name} (ID: {member.id})\n" \
+                       f"👥 المجموعة: {update.effective_chat.title}"
+            await send_admin_notification(context, admin_msg)
+            
     except Exception as e:
         logger.error(f"Error in welcome_new_member: {e}")
 
@@ -929,12 +1022,21 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # إضافة تحذير للعضو
                     warn_count = await warn_user(update.effective_chat.id, user.id, "كلمات غير لائقة", context.bot.id)
                     
-                    # إرسال رسالة توضيحية
+                    # إرسال رسالة توضيحية للمجموعة
                     warning_msg = f"⚠️ تم حذف رسالة {user.first_name} لاحتوائها على كلمات غير لائقة.\nعدد تحذيراته: {warn_count}/{settings['max_warns']}"
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text=warning_msg
                     )
+                    
+                    # إرسال إشعار خاص للإدمن
+                    admin_msg = f"🚨 <b>تم حذف رسالة مسيئة</b>\n\n" \
+                               f"👤 العضو: {user.first_name} (ID: {user.id})\n" \
+                               f"💬 الرسالة: {text[:100]}...\n" \
+                               f"📊 عدد التحذيرات: {warn_count}/{settings['max_warns']}\n" \
+                               f"👥 المجموعة: {update.effective_chat.title}"
+                    await send_admin_notification(context, admin_msg)
+                    
                 except Exception as e:
                     logger.error(f"Error deleting message: {e}")
                 return
@@ -947,12 +1049,21 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # إضافة تحذير للعضو
                     warn_count = await warn_user(update.effective_chat.id, user.id, "نشر روابط", context.bot.id)
                     
-                    # إرسال رسالة توضيحية
+                    # إرسال رسالة توضيحية للمجموعة
                     warning_msg = f"⚠️ تم حذف رسالة {user.first_name} لاحتوائها على روابط.\nعدد تحذيراته: {warn_count}/{settings['max_warns']}"
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text=warning_msg
                     )
+                    
+                    # إرسال إشعار خاص للإدمن
+                    admin_msg = f"🔗 <b>تم حذف رسالة تحتوي على روابط</b>\n\n" \
+                               f"👤 العضو: {user.first_name} (ID: {user.id})\n" \
+                               f"💬 الرسالة: {text[:100]}...\n" \
+                               f"📊 عدد التحذيرات: {warn_count}/{settings['max_warns']}\n" \
+                               f"👥 المجموعة: {update.effective_chat.title}"
+                    await send_admin_notification(context, admin_msg)
+                    
                 except Exception as e:
                     logger.error(f"Error deleting message with link: {e}")
                 return
@@ -973,6 +1084,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 # ================== ويب هوك ==================
+
+async def home_handler(request):
+    return web.Response(text="🤖 Bot is running successfully!")
 
 async def webhook_handler(request):
     token = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
@@ -1035,6 +1149,7 @@ def main():
     application.add_error_handler(error_handler)
 
     web_app = web.Application()
+    web_app.router.add_get('/', home_handler)
     web_app.router.add_post('/webhook', webhook_handler)
     web_app.on_startup.append(on_startup)
     web_app.on_shutdown.append(on_shutdown)
@@ -1043,4 +1158,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
