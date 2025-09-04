@@ -759,11 +759,10 @@ async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # ثانياً: جلب الأعضاء من قاعدة البيانات
         members = get_members(chat_id, limit=2000)
-
-             if not members:
+        
+        if not members:
             await update.message.reply_text("📭 لا يوجد أعضاء مخزنون في هذه المجموعة.\nسيتم حفظ الأعضاء عند تفاعلهم في المجموعة.")
             return
-
         mentions = []
         for member in members:
             user_id, username, first_name, last_name = member
@@ -1183,3 +1182,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
