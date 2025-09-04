@@ -36,7 +36,7 @@ HEARTBEAT_INTERVAL = 10 * 60  # كل 10 دقائق (600 ثانية)
 DATABASE_URL = "postgresql://mybotuser:prb09Wv3eU2OhkoeOXyR5n05IBBMEvhn@dpg-d2s5g4m3jp1c738svjfg-a.frankfurt-postgres.render.com/mybotdb_mqjm"
 
 # إعدادات إضافية
-ADMIN_ID = 123456789  # ضع هنا الأيدي الخاص بك للإشعارات
+ADMIN_ID = 7635779264  # ضع هنا الأيدي الخاص بك للإشعارات
 KEEP_ALIVE_URL = "https://abdellahb-2.onrender.com"  # رابط تطبيقك
 
 # اتصال مباشر بدون pool
@@ -1043,3 +1043,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
