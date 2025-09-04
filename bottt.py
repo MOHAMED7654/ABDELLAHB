@@ -714,7 +714,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = query.data.split("_")
         action = parts[1]
         user_id = int(parts[2])
-        chat_id = parts[3]
+        chat_id = int(parts[3])  # تحويل إلى integer
         
         if action == "approve":
             try:
@@ -760,7 +760,7 @@ async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ثانياً: جلب الأعضاء من قاعدة البيانات
         members = get_members(chat_id, limit=2000)
 
-        if not members:
+             if not members:
             await update.message.reply_text("📭 لا يوجد أعضاء مخزنون في هذه المجموعة.\nسيتم حفظ الأعضاء عند تفاعلهم في المجموعة.")
             return
 
@@ -812,10 +812,12 @@ async def warn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             ]
             
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await update.message.reply_text(
                 f"⚠️ {user_name} وصل إلى الحد الأقصى للتحذيرات ({warns}/{max_warns})\n"
                 f"هل تريد طرده الآن؟",
-                reply_markup=InlineKeyboardMarkup(keyboard)
+                reply_markup=reply_markup
             )
         else:
             await update.message.reply_text(
