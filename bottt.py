@@ -25,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # بيانات البوت
-TOKEN = "8124498237:AAHipIHoU3W6OzYF2RiuxZvkc7ar8FWmyas"
+TOKEN = "8420841832:AAEQh1Gf2InTT8UBfFoL4ATD2BiGlA0BRJA"
 SECRET_TOKEN = "my_secret_123"
 WEBHOOK_URL = "https://abdellahb-2.onrender.com/webhook"
 PORT = int(os.environ.get('PORT', 8443))
@@ -1182,4 +1182,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
