@@ -736,14 +736,19 @@ async def admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = "👮‍♂️ *قائمة الإداريين:*\n\n"
         for admin in admins_list:
             user = admin.user
-            username = f"@{user.username}" if user.username else user.full_name
+            # إصلاح عرض username مع الشرطات السفلية
+            if user.username:
+                # استخدام الهروب للشرطات السفلية في Markdown
+                username_display = f"@{user.username.replace('_', r'\_')}"
+            else:
+                username_display = user.full_name
+            
             status = "👑 منشئ" if admin.status == "creator" else "🔧 مشرف"
-            msg += f"• {username} ({status})\n"
+            msg += f"• {username_display} ({status})\n"
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error in admins command: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء جلب قائمة المشرفين.")
-
 @admin_only
 async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -1178,3 +1183,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
