@@ -448,7 +448,7 @@ auto_replies = {
 # رسائل الترحيب
 WELCOME_MESSAGES = {
     "ar": """
-أهلا وسهلا بك في مجتمعنا الراقي للإعلام الآلي     
+أهلا وسهلا بك في مجتمعنا الراقي      
 """,
     "en": """
 Welcome to our elite informatics community!  
@@ -1183,4 +1183,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
