@@ -451,16 +451,7 @@ WELCOME_MESSAGES = {
 أهلا وسهلا بك في مجتمعنا الراقي      
 """,
     "en": """
-Welcome to our elite informatics community!  
-Please adhere to the following rules:  
-1- No sharing links without permission  
-2- Avoid off-topic discussions except for studies, and maintain polite conversation  
-3- Refrain from suspicious private communication (you can ask any questions in the group)  
-We are only responsible for what happens within the group  
-4- Compliance with administrators' decisions is necessary to maintain order  
-Note: In case of necessity, you can contact the admins (females with the group owner, males with male admins)  
-🫧 𝓣𝓸𝓾𝓴𝓪 ꨄ︎
-"""
+Welcome to our elite  
 }
 
 # تهيئة التطبيق
@@ -548,77 +539,110 @@ def admin_only(handler):
         return await handler(update, context)
     return wrapper
 
-# وظيفة جديدة لجلب جميع الأعضاء باستخدام Telegram API
-async def get_all_chat_members(chat_id, context):
-    """جلب جميع أعضاء المجموعة باستخدام Telegram API"""
-    try:
-        # استخدام get_chat_member_count بدلاً من get_chat_members_count
-        members_count = await context.bot.get_chat_member_count(chat_id)
-        logger.info(f"📊 العدد الإجمالي لأعضاء المجموعة: {members_count}")
-        
-        all_members = []
-        
-        # جلب المشرفين أولاً (يمكننا جلبهم مباشرة)
-        try:
-            admins = await context.bot.get_chat_administrators(chat_id)
-            for admin in admins:
-                user = admin.user
-                if not user.is_bot:  # تجاهل البوتات
-                    all_members.append({
-                        'user_id': user.id,
-                        'username': user.username,
-                        'first_name': user.first_name,
-                        'last_name': user.last_name
-                    })
-            logger.info(f"✅ تم جلب {len(admins)} مشرف")
-        except Exception as e:
-            logger.error(f"❌ خطأ في جلب المشرفين: {e}")
-        
-        # للأسف، لا توجد طريقة مباشرة لجلب جميع الأعضاء في الإصدارات الحديثة
-        # لذلك سنعتمد على حفظ الأعضاء عند تفاعلهم فقط
-        
-        logger.info(f"✅ تم جلب {len(all_members)} عضو (المشرفين فقط)")
-        return all_members
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في جلب عدد الأعضاء: {e}")
-        return []
+# ================== نظام التاق الجديد بدون قاعدة بيانات ==================
 
-async def save_all_members(chat_id, context):
-    """حفظ جميع أعضاء المجموعة في قاعدة البيانات"""
+@admin_only
+async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تاق شامل بدون قاعدة بيانات - يرسل 20 رسالة × 200 عضو"""
     try:
-        logger.info(f"⏳ جاري معالجة أعضاء المجموعة {chat_id}...")
+        chat_id = update.effective_chat.id
         
-        # 1. جلب المشرفين فقط (لا يمكن جلب جميع الأعضاء مباشرة)
-        all_members = await get_all_chat_members(chat_id, context)
+        # الحصول على عدد الأعضاء
+        members_count = await context.bot.get_chat_member_count(chat_id)
+        await update.message.reply_text(f"👥 جاري تجهيز تاق لـ {members_count} عضو...")
         
-        if not all_members:
-            logger.error("❌ لم يتم جلب أي أعضاء من المجموعة")
-            return False
+        total_mentioned = 0
+        max_messages = 20  # 20 رسالة كحد أقصى
+        members_per_message = 200  # 200 عضو في كل رسالة
         
-        # 2. حفظ المشرفين في قاعدة البيانات
-        saved_count = 0
-        for member in all_members:
-            try:
-                add_member(
-                    member['user_id'],
-                    str(chat_id),
-                    member['username'],
-                    member['first_name'],
-                    member['last_name']
-                )
-                saved_count += 1
-            except Exception as e:
-                logger.error(f"❌ خطأ في حفظ العضو {member['user_id']}: {e}")
-                continue
+        # إرسال رسائل التاق على دفعات
+        for message_num in range(max_messages):
+            mentions = []
+            
+            # حساب نطاق الأعضاء لهذه الرسالة
+            start_index = message_num * members_per_message + 1
+            end_index = start_index + members_per_message - 1
+            
+            # جلب الأعضاء ضمن هذا النطاق
+            for i in range(start_index, min(end_index + 1, members_count + 1)):
+                try:
+                    # جلب معلومات العضو
+                    member = await context.bot.get_chat_member(chat_id, i)
+                    user = member.user
+                    
+                    if not user.is_bot:  # تجاهل البوتات
+                        name = f"@{user.username}" if user.username else user.first_name
+                        mentions.append(f"[{name}](tg://user?id={user.id})")
+                        total_mentioned += 1
+                        
+                except Exception as e:
+                    # تخطي الأعضاء غير المتاحين
+                    continue
+                
+                # إذا وصلنا لـ 200 عضو، توقف
+                if len(mentions) >= members_per_message:
+                    break
+            
+            if mentions:
+                # إرسال رسالة التاق
+                message_text = f"📢 التاق الجماعي ({message_num + 1}/{max_messages}):\n\n" + "\n".join(mentions)
+                await update.message.reply_text(message_text, parse_mode="Markdown")
+                
+                # تأخير 1 ثانية بين الرسائل
+                await asyncio.sleep(1)
+            else:
+                # لا يوجد المزيد من الأعضاء
+                break
         
-        logger.info(f"✅ تم حفظ {saved_count} عضو في قاعدة البيانات")
-        
-        return saved_count > 0
+        await update.message.reply_text(f"✅ تم الانتهاء من التاق لـ {total_mentioned} عضو!")
         
     except Exception as e:
-        logger.error(f"❌ Error in save_all_members: {e}")
-        return False
+        logger.error(f"Error in tagall: {e}")
+        await update.message.reply_text("⚠️ حدث خطأ أثناء التاق")
+
+@admin_only
+async def quick_tag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تاق سريع للمشرفين والأعضاء النشطين"""
+    try:
+        chat_id = update.effective_chat.id
+        mentions = []
+        
+        # 1. إضافة جميع المشرفين أولاً
+        admins = await context.bot.get_chat_administrators(chat_id)
+        for admin in admins:
+            user = admin.user
+            if not user.is_bot:
+                name = f"@{user.username}" if user.username else user.first_name
+                mentions.append(f"[{name}](tg://user?id={user.id})")
+        
+        # 2. محاولة جلب بعض الأعضاء النشطين
+        members_count = await context.bot.get_chat_member_count(chat_id)
+        
+        # إضافة بعض الأعضاء العشوائيين لإكمال العدد
+        needed_members = 200 - len(mentions)
+        if needed_members > 0:
+            for i in range(1, min(needed_members + 1, members_count + 1)):
+                try:
+                    member = await context.bot.get_chat_member(chat_id, i)
+                    user = member.user
+                    if not user.is_bot and user.id not in [m.user.id for m in admins]:
+                        name = f"@{user.username}" if user.username else user.first_name
+                        mention_text = f"[{name}](tg://user?id={user.id})"
+                        if mention_text not in mentions:
+                            mentions.append(mention_text)
+                except:
+                    continue
+        
+        if mentions:
+            message = "📢 تاق سريع:\n\n" + "\n".join(mentions[:200])  # تأكد من عدم تجاوز 200
+            await update.message.reply_text(message, parse_mode="Markdown")
+            await update.message.reply_text(f"✅ تم منشن {len(mentions)} عضو (التاق السريع)")
+        else:
+            await update.message.reply_text("❌ لم أتمكن من جلب أي أعضاء")
+            
+    except Exception as e:
+        logger.error(f"Error in quick_tag: {e}")
+        await update.message.reply_text("⚠️ حدث خطأ أثناء التاق السريع")
 
 # ================== الأوامر الأساسية ==================
 
@@ -629,8 +653,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📌 *أوامر المشرفين:*
 • /admins - عرض قائمة المشرفين
-• /tagall - منشن لجميع الأعضاء (يدعم 2000+ عضو)
-• /sync - مزامنة الأعضاء مع قاعدة البيانات
+• /tagall - منشن لجميع الأعضاء (4000+ عضو  )
+• /quick_tag - تاق سريع للمشرفين والنشطين
 • /warn - تحذير عضو (بالرد على رسالته)
 • /unwarn - إزالة تحذيرات عضو
 • /warns - عرض تحذيرات عضو
@@ -651,8 +675,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 👨‍💻 *أوامر الإدارة:*
 ├ /admins - عرض قائمة المشرفين
-├ /tagall - عمل منشن لجميع الأعضاء (2000+ عضو)
-├ /sync - مزامنة الأعضاء مع قاعدة البيانات
+├ /tagall - منشن شامل (4000 عضو - 20 رسالة)
+├ /quick_tag - تاق سريع (200 عضو - رسالة واحدة)
 ├ /warn - تحذير عضو (بالرد + سبب)
 ├ /unwarn - إزالة تحذيرات عضو
 ├ /warns - عرض تحذيرات عضو
@@ -667,27 +691,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • منع الكلمات المسيئة
 • الترحيب بالأعضاء الجدد
 • الردود التلقائية
-• حفظ الأعضاء في قاعدة بيانات دائمة
 
 📝 *للاستفسار:* @Mik_emm
 """
     await update.message.reply_text(help_text, parse_mode="Markdown")
-
-@admin_only
-async def sync_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مزامنة جميع أعضاء المجموعة مع قاعدة البيانات"""
-    try:
-        await update.message.reply_text("⏳ جاري مزامنة الأعضاء مع قاعدة البيانات...")
-        
-        if await save_all_members(update.effective_chat.id, context):
-            members = get_members(str(update.effective_chat.id))
-            await update.message.reply_text(f"✅ تم مزامنة {len(members)} عضو في قاعدة البيانات.\n\n💾 سيتم حفظ الأعضاء الجدد عند تفاعلهم في المجموعة.")
-        else:
-            await update.message.reply_text("❌ فشل في مزامنة الأعضاء.")
-            
-    except Exception as e:
-        logger.error(f"Error in sync_members: {e}")
-        await update.message.reply_text("⚠️ حدث خطأ أثناء المزامنة.")
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -749,45 +756,6 @@ async def admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in admins command: {e}")
         await update.message.reply_text("⚠️ حدث خطأ أثناء جلب قائمة المشرفين.")
-@admin_only
-async def tagall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        chat_id = str(update.effective_chat.id)
-        
-        # أولاً: حفظ جميع الأعضاء الحاليين في قاعدة البيانات
-        await update.message.reply_text("⏳ جاري تحديث قائمة الأعضاء...")
-        await save_all_members(update.effective_chat.id, context)
-        
-        # ثانياً: جلب الأعضاء من قاعدة البيانات
-        members = get_members(chat_id, limit=2000)
-        
-        if not members:
-            await update.message.reply_text("📭 لا يوجد أعضاء مخزنون في هذه المجموعة.\nسيتم حفظ الأعضاء عند تفاعلهم في المجموعة.")
-            return
-        mentions = []
-        for member in members:
-            user_id, username, first_name, last_name = member
-            name = username or f"{first_name} {last_name}".strip() or f"user_{user_id}"
-            mentions.append(f"[{name}](tg://user?id={user_id})")
-        
-        # إرسال المنشن على دفعات مع تأخير (40 عضو لكل رسالة)
-        total_mentioned = 0
-        batch_size = 40
-        
-        for i in range(0, len(mentions), batch_size):
-            batch = mentions[i:i+batch_size]
-            message = "📢 منشن لجميع الأعضاء:\n\n" + "\n".join(batch)
-            await update.message.reply_text(message, parse_mode="Markdown")
-            total_mentioned += len(batch)
-            
-            # تأخير 1 ثانية بين كل دفعة لتجنب الحظر
-            await asyncio.sleep(1)
-        
-        await update.message.reply_text(f"✅ تم عمل منشن لـ {total_mentioned} عضو.")
-        
-    except Exception as e:
-        logger.error(f"Error in tagall: {e}")
-        await update.message.reply_text("⚠️ حدث خطأ أثناء عمل المنشن.")
 
 @admin_only
 async def warn_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1157,9 +1125,9 @@ def main():
     # إضافة handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("sync", sync_members))
-    application.add_handler(CommandHandler("admins", admins))
     application.add_handler(CommandHandler("tagall", tagall))
+    application.add_handler(CommandHandler("quick_tag", quick_tag))
+    application.add_handler(CommandHandler("admins", admins))
     application.add_handler(CommandHandler("warn", warn_user_command))
     application.add_handler(CommandHandler("unwarn", unwarn_user_command))
     application.add_handler(CommandHandler("warns", get_warns_command))
@@ -1183,5 +1151,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
