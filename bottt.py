@@ -451,7 +451,16 @@ WELCOME_MESSAGES = {
 أهلا وسهلا بك في مجتمعنا الراقي      
 """,
     "en": """
-Welcome to our elite  
+Welcome to our elite informatics community!  
+Please adhere to the following rules:  
+1- No sharing links without permission  
+2- Avoid off-topic discussions except for studies, and maintain polite conversation  
+3- Refrain from suspicious private communication (you can ask any questions in the group)  
+We are only responsible for what happens within the group  
+4- Compliance with administrators' decisions is necessary to maintain order  
+Note: In case of necessity, you can contact the admins (females with the group owner, males with male admins)  
+🫧 𝓣𝓸𝓾𝓴𝓪 ꨄ︎
+"""
 }
 
 # تهيئة التطبيق
@@ -653,7 +662,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📌 *أوامر المشرفين:*
 • /admins - عرض قائمة المشرفين
-• /tagall - منشن لجميع الأعضاء (4000+ عضو  )
+• /tagall - منشن لجميع الأعضاء (4000+ عضو - بدون قاعدة بيانات)
 • /quick_tag - تاق سريع للمشرفين والنشطين
 • /warn - تحذير عضو (بالرد على رسالته)
 • /unwarn - إزالة تحذيرات عضو
